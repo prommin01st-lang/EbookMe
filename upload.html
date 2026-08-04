@@ -67,6 +67,68 @@
     font-size: 0.9rem;
     display: none;
   }
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 1rem;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+    padding: 1.25rem 1.4rem;
+    max-width: 26rem;
+    width: 100%;
+    animation: modal-in 0.15s ease;
+  }
+  @keyframes modal-in {
+    from { transform: translateY(10px) scale(0.97); opacity: 0; }
+  }
+  .modal h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+  .modal p { margin: 0 0 1.2rem; font-size: 0.9rem; color: var(--text-dim); white-space: pre-line; line-height: 1.7; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; }
+  .modal .btn.cancel { border: 1px solid var(--border); font-size: 0.95rem; padding: 0.5rem 1rem; }
+  .modal .btn.danger { background: #d04545; color: #fff; font-weight: 600; font-size: 0.95rem; padding: 0.5rem 1.1rem; }
+  .emoji-btn {
+    width: 100%;
+    font-size: 1.5rem;
+    line-height: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.42rem 0.75rem;
+    cursor: pointer;
+  }
+  .emoji-pop {
+    display: none;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 0.1rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.5rem;
+    margin-top: 0.4rem;
+    max-height: 11rem;
+    overflow-y: auto;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  }
+  .emoji-pop.show { display: grid; }
+  .emoji-pop button {
+    font-size: 1.25rem;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    padding: 0.3rem 0;
+    cursor: pointer;
+  }
+  .emoji-pop button:hover { background: var(--accent-soft); }
 </style>
 </head>
 <body>
@@ -100,8 +162,9 @@
           <input type="text" id="bookId" placeholder="calculus-1">
         </div>
         <div>
-          <label for="bookCover">อีโมจิหน้าปก</label>
-          <input type="text" id="bookCover" placeholder="📘">
+          <label for="bookCover">อีโมจิหน้าปก (แตะเพื่อเลือก)</label>
+          <button type="button" class="emoji-btn" id="bookCover">📘</button>
+          <div class="emoji-pop" id="emojiPop"></div>
         </div>
       </div>
       <label for="bookTitle">ชื่อหนังสือ</label>
@@ -138,6 +201,17 @@
 
 </main>
 
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h3 id="modalTitle"></h3>
+    <p id="modalMsg"></p>
+    <div class="modal-actions">
+      <button class="btn cancel" id="modalCancel">ยกเลิก</button>
+      <button class="btn danger" id="modalOk">ยืนยัน</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 let cloudBooks = [];
@@ -148,6 +222,27 @@ function esc(s) {
 }
 
 $('key').value = localStorage.getItem('ebook:apikey') || '';
+
+/* --- emoji picker หน้าปก --- */
+const COVER_EMOJIS = [
+  '📘','📗','📙','📕','📓','📔','📚','📖','📝','✏️','🧮','📐',
+  '🔢','🧪','⚗️','🧬','🔬','🔭','⚛️','🧲','💊','🩺','🧠','🦠',
+  '💻','🖥️','⌨️','🤖','👨‍💻','🌐','🔐','🗄️','📊','📈','⚙️','🛠️',
+  '🚀','🛰️','✈️','⚡','🔋','💡','🎨','🎵','🎸','🎬','📷','🎮',
+  '🏛️','⚖️','💼','💰','📅','🗂️','🌍','🗺️','🌱','🍃','☕','🎯',
+  '🏆','⭐','🔥','❤️'
+];
+$('emojiPop').innerHTML = COVER_EMOJIS.map(e => `<button type="button">${e}</button>`).join('');
+$('bookCover').addEventListener('click', () => $('emojiPop').classList.toggle('show'));
+$('emojiPop').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  $('bookCover').textContent = b.textContent;
+  $('emojiPop').classList.remove('show');
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('#emojiPop, #bookCover')) $('emojiPop').classList.remove('show');
+});
 
 function selectedBook() {
   const v = $('bookSelect').value;
@@ -304,6 +399,29 @@ function showStatus(ok, html) {
   s.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
+/* modal ยืนยันแทน confirm() ของเบราว์เซอร์ — คืนค่า Promise<boolean> */
+function askConfirm({ title, message, okText = 'ยืนยัน' }) {
+  return new Promise(resolve => {
+    const ov = $('modalOverlay');
+    $('modalTitle').textContent = title;
+    $('modalMsg').textContent = message;
+    $('modalOk').textContent = okText;
+    ov.classList.add('show');
+    const done = v => {
+      ov.classList.remove('show');
+      $('modalOk').onclick = $('modalCancel').onclick = ov.onclick = null;
+      document.removeEventListener('keydown', onKey);
+      resolve(v);
+    };
+    const onKey = e => { if (e.key === 'Escape') done(false); };
+    $('modalOk').onclick = () => done(true);
+    $('modalCancel').onclick = () => done(false);
+    ov.onclick = e => { if (e.target === ov) done(false); };
+    document.addEventListener('keydown', onKey);
+    $('modalCancel').focus();
+  });
+}
+
 async function api(method, payloadOrQuery) {
   const key = $('key').value.trim();
   const opts = { method, headers: { 'Authorization': 'Bearer ' + key } };
@@ -324,7 +442,7 @@ $('submitBtn').addEventListener('click', async () => {
   const bookMeta = {
     bookId: book ? book.id : $('bookId').value.trim().toLowerCase(),
     bookTitle: book ? undefined : $('bookTitle').value.trim(),
-    bookCover: book ? undefined : $('bookCover').value.trim(),
+    bookCover: book ? undefined : $('bookCover').textContent.trim(),
     bookDescription: book ? undefined : $('bookDesc').value.trim(),
   };
   const content = $('content').value;
@@ -339,7 +457,11 @@ $('submitBtn').addEventListener('click', async () => {
   if (!parts && book) {
     const fn = $('filename').value.trim();
     const dupe = book.chapters.find(c => c.file === fn);
-    if (dupe && !confirm(`⚠️ มีบท "${dupe.title}" ใช้ชื่อไฟล์ ${fn} อยู่แล้ว\nอัปโหลดต่อ = เขียนทับเนื้อหาบทนั้น\n\nถ้าตั้งใจจะ "เพิ่มบทใหม่" ให้กด Cancel แล้วแก้ชื่อไฟล์ไม่ให้ซ้ำ`)) {
+    if (dupe && !(await askConfirm({
+      title: '⚠️ เขียนทับบทเดิม?',
+      message: `มีบท "${dupe.title}" ใช้ชื่อไฟล์ ${fn} อยู่แล้ว\nอัปโหลดต่อ = แทนที่เนื้อหาบทนั้นถาวร\nถ้าตั้งใจเพิ่มบทใหม่ ให้ยกเลิกแล้วแก้ชื่อไฟล์ไม่ให้ซ้ำ`,
+      okText: 'เขียนทับ',
+    }))) {
       return showStatus(false, 'ยกเลิกการเขียนทับแล้ว — แก้ "ชื่อไฟล์" ให้ไม่ซ้ำ แล้วอัปโหลดใหม่จะกลายเป็นบทใหม่แทน');
     }
   }
@@ -391,7 +513,11 @@ $('submitBtn').addEventListener('click', async () => {
 });
 
 async function removeChapter(bookId, file) {
-  if (!confirm(`ลบบท ${file} ?`)) return;
+  if (!(await askConfirm({
+    title: 'ลบบทนี้?',
+    message: `ไฟล์ ${file} จะถูกลบถาวร กู้คืนไม่ได้`,
+    okText: '🗑️ ลบบท',
+  }))) return;
   try {
     await api('DELETE', { bookId, file });
     localStorage.setItem('ebook:apikey', $('key').value.trim());
@@ -403,7 +529,11 @@ async function removeChapter(bookId, file) {
 }
 
 async function removeBook(bookId) {
-  if (!confirm(`ลบหนังสือ "${bookId}" ทั้งเล่ม? บททั้งหมดจะหายถาวร`)) return;
+  if (!(await askConfirm({
+    title: `ลบหนังสือ "${bookId}" ทั้งเล่ม?`,
+    message: 'ทุกบทในเล่มจะถูกลบถาวร กู้คืนไม่ได้',
+    okText: '🗑️ ลบทั้งเล่ม',
+  }))) return;
   try {
     await api('DELETE', { bookId });
     $('bookSelect').value = '__new__';
