@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>☁️ อัปโหลดหนังสือ — EbookMe</title>
+<title>☁️ เพิ่มหนังสือ — EbookMe</title>
 <script>
   (function () {
     var t = localStorage.getItem('ebook:theme');
@@ -17,10 +17,34 @@
   .form-main {
     max-width: 44rem;
     margin: 0 auto;
-    padding: 1.25rem max(1rem, env(safe-area-inset-right)) 4rem max(1rem, env(safe-area-inset-left));
+    padding: 1rem max(1rem, env(safe-area-inset-right)) 4rem max(1rem, env(safe-area-inset-left));
     display: grid;
     gap: 1rem;
   }
+  .steps {
+    display: flex;
+    gap: 0.35rem;
+    max-width: 44rem;
+    margin: 1rem auto 0;
+    padding: 0 max(1rem, env(safe-area-inset-right)) 0 max(1rem, env(safe-area-inset-left));
+  }
+  .step-dot {
+    flex: 1;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    padding-bottom: 0.5rem;
+    border-bottom: 3px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .step-dot.done { border-color: var(--accent); }
+  .step-dot.active { color: var(--accent); border-color: var(--accent); font-weight: 700; }
+  .step-panel { display: none; }
+  .step-panel.active { display: block; animation: step-in 0.18s ease; }
+  @keyframes step-in { from { opacity: 0; transform: translateX(14px); } }
+
   .card {
     background: var(--bg-elev);
     border: 1px solid var(--border);
@@ -44,10 +68,15 @@
   .card .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
   @media (max-width: 480px) { .card .row { grid-template-columns: 1fr; } }
   .hint { font-size: 0.8rem; color: var(--text-dim); margin: 0.35rem 0 0; }
+
+  .wiz-nav { display: flex; justify-content: space-between; gap: 0.6rem; }
+  .wiz-nav .btn { font-size: 0.95rem; padding: 0.55rem 1.2rem; }
+
   .status { border-radius: 10px; padding: 0.8rem 1rem; font-size: 0.92rem; display: none; }
   .status.show { display: block; }
   .status.ok { background: var(--tip-bg); border: 1px solid var(--tip-bd); }
   .status.err { background: var(--warn-bg); border: 1px solid var(--warn-bd); }
+
   .chapter-row {
     display: flex;
     align-items: center;
@@ -59,6 +88,7 @@
   .chapter-row:last-of-type { border-bottom: none; }
   .chapter-row .file { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-dim); flex-shrink: 0; }
   .chapter-row .del { margin-left: auto; color: #d04545; min-height: 2rem; min-width: 2rem; }
+
   .banner {
     background: var(--note-bg);
     border: 1px solid var(--note-bd);
@@ -67,6 +97,7 @@
     font-size: 0.9rem;
     display: none;
   }
+
   .modal-overlay {
     position: fixed;
     inset: 0;
@@ -94,8 +125,9 @@
   .modal h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
   .modal p { margin: 0 0 1.2rem; font-size: 0.9rem; color: var(--text-dim); white-space: pre-line; line-height: 1.7; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; }
-  .modal .btn.cancel { border: 1px solid var(--border); font-size: 0.95rem; padding: 0.5rem 1rem; }
-  .modal .btn.danger { background: #d04545; color: #fff; font-weight: 600; font-size: 0.95rem; padding: 0.5rem 1.1rem; }
+  .btn.cancel { border: 1px solid var(--border); font-size: 0.95rem; padding: 0.5rem 1rem; }
+  .btn.danger { background: #d04545; color: #fff; font-weight: 600; font-size: 0.95rem; padding: 0.5rem 1.1rem; }
+
   .emoji-btn {
     width: 100%;
     font-size: 1.5rem;
@@ -129,30 +161,41 @@
     cursor: pointer;
   }
   .emoji-pop button:hover { background: var(--accent-soft); }
+
+  #summary .cover-line { font-size: 1.05rem; margin: 0.8rem 0 0.3rem; }
 </style>
 </head>
 <body>
 
 <header class="topbar">
   <a class="btn" href="index.html" title="กลับชั้นหนังสือ">←</a>
-  <span class="title">☁️ อัปโหลดหนังสือขึ้นคลาวด์</span>
+  <span class="title">☁️ เพิ่มหนังสือ / บทใหม่</span>
 </header>
+
+<div class="steps">
+  <div class="step-dot">1 · Key</div>
+  <div class="step-dot">2 · หนังสือ</div>
+  <div class="step-dot">3 · เนื้อหา</div>
+  <div class="step-dot">4 · อัปโหลด</div>
+</div>
 
 <main class="form-main">
 
   <div class="banner" id="offlineBanner">
-    ⚠️ ติดต่อ API ไม่ได้ — หน้านี้ใช้งานได้เมื่อเว็บ deploy บน Vercel และตั้งค่า Blob store + <code>UPLOAD_KEY</code> แล้วเท่านั้น (ดูขั้นตอนใน README) ยังกรอกฟอร์มทดลองดูได้แต่จะอัปโหลดไม่สำเร็จ
+    ⚠️ ติดต่อ API ไม่ได้ — หน้านี้ใช้งานได้เมื่อเว็บ deploy บน Vercel และตั้งค่า Blob store + <code>UPLOAD_KEY</code> แล้วเท่านั้น (ดูขั้นตอนใน README)
   </div>
 
-  <div class="card">
-    <h2>🔑 Key</h2>
-    <label for="key">key สำหรับอัปโหลด (ค่า <code>UPLOAD_KEY</code> ที่ตั้งไว้บน Vercel)</label>
+  <!-- ขั้นที่ 1 -->
+  <div class="card step-panel" id="step1">
+    <h2>🔑 ใส่ key สำหรับอัปโหลด</h2>
+    <label for="key">ค่า <code>UPLOAD_KEY</code> ที่ตั้งไว้บน Vercel</label>
     <input type="password" id="key" autocomplete="off" placeholder="วาง key ที่นี่">
-    <p class="hint">อัปโหลดสำเร็จครั้งแรกแล้ว เครื่องนี้จะจำ key ให้อัตโนมัติ (เก็บใน localStorage ผูกกับโดเมนนี้เท่านั้น ไม่ส่งไปไหน)</p>
+    <p class="hint">ใส่ครั้งแรกครั้งเดียว — อัปโหลดสำเร็จแล้วเครื่องนี้จะจำให้อัตโนมัติ และครั้งหน้าจะข้ามขั้นตอนนี้ให้เลย</p>
   </div>
 
-  <div class="card">
-    <h2>📚 หนังสือปลายทาง</h2>
+  <!-- ขั้นที่ 2 -->
+  <div class="card step-panel" id="step2">
+    <h2>📚 จะเพิ่มลงหนังสือเล่มไหน?</h2>
     <label for="bookSelect">เลือกหนังสือ</label>
     <select id="bookSelect"><option value="__new__">➕ สร้างเล่มใหม่…</option></select>
     <div id="newBookFields">
@@ -162,7 +205,7 @@
           <input type="text" id="bookId" placeholder="calculus-1">
         </div>
         <div>
-          <label for="bookCover">อีโมจิหน้าปก (แตะเพื่อเลือก)</label>
+          <label for="bookCoverLabel">อีโมจิหน้าปก (แตะเพื่อเลือก)</label>
           <button type="button" class="emoji-btn" id="bookCover">📘</button>
           <div class="emoji-pop" id="emojiPop"></div>
         </div>
@@ -175,8 +218,9 @@
     <div id="chapterList"></div>
   </div>
 
-  <div class="card">
-    <h2>📄 บทที่จะอัปโหลด</h2>
+  <!-- ขั้นที่ 3 -->
+  <div class="card step-panel" id="step3">
+    <h2>📄 ใส่เนื้อหาบทเรียน</h2>
     <label for="file">เลือกไฟล์ .md / .html จากเครื่อง (หรือวางเนื้อหาในช่องล่างเองก็ได้)</label>
     <input type="file" id="file" accept=".md,.markdown,.html">
     <label for="splitMode">การแบ่งบท (เฉพาะ markdown)</label>
@@ -196,7 +240,16 @@
     <textarea id="content" placeholder="# บทที่ 1 …&#10;&#10;วางเนื้อหาที่ได้จาก AI ตรงนี้ได้เลย"></textarea>
   </div>
 
-  <button class="btn primary" id="submitBtn" style="justify-self:start">⬆️ อัปโหลด</button>
+  <!-- ขั้นที่ 4 -->
+  <div class="card step-panel" id="step4">
+    <h2>✅ ตรวจสอบก่อนอัปโหลด</h2>
+    <div id="summary"></div>
+  </div>
+
+  <div class="wiz-nav">
+    <button class="btn cancel" id="backBtn">‹ ย้อนกลับ</button>
+    <button class="btn primary" id="nextBtn">ถัดไป ›</button>
+  </div>
   <div class="status" id="status"></div>
 
 </main>
@@ -216,6 +269,7 @@
 const $ = id => document.getElementById(id);
 let cloudBooks = [];
 let filenameDirty = false;
+let step = 1;
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -244,6 +298,7 @@ document.addEventListener('click', e => {
   if (!e.target.closest('#emojiPop, #bookCover')) $('emojiPop').classList.remove('show');
 });
 
+/* --- helpers --- */
 function selectedBook() {
   const v = $('bookSelect').value;
   return v === '__new__' ? null : cloudBooks.find(b => b.id === v) || null;
@@ -283,7 +338,6 @@ function splitMarkdown(text, level) {
     const m = inFence ? null : line.match(re);
     if (m) {
       parts.push(cur);
-      // ยกหัวข้อที่ใช้แบ่งขึ้นเป็น h1 ของบทใหม่เสมอ
       cur = { title: m[1].trim(), lines: [line.replace(/^##\s/, '# ')] };
     } else {
       cur.lines.push(line);
@@ -315,16 +369,15 @@ function updateSplitUI() {
   const pv = $('splitPreview');
   if (!parts) {
     pv.innerHTML = '';
-    $('submitBtn').textContent = '⬆️ อัปโหลด';
     return;
   }
   const base = selectedBook() ? selectedBook().chapters.length : 0;
   pv.innerHTML = `<label>จะแบ่งเป็น ${parts.length} บท:</label>` + parts.map((p, i) =>
     `<div class="chapter-row"><span class="file">${String(base + i + 1).padStart(2, '0')}</span><span>${esc(p.title)}</span></div>`
   ).join('');
-  $('submitBtn').textContent = `⬆️ อัปโหลด (${parts.length} บท)`;
 }
 
+/* --- รายชื่อบทของเล่มที่เลือก + ปุ่มลบ --- */
 function renderBookUI() {
   const book = selectedBook();
   $('newBookFields').style.display = book ? 'none' : '';
@@ -392,11 +445,15 @@ $('file').addEventListener('change', async () => {
   updateSplitUI();
 });
 
+/* --- status + modal --- */
 function showStatus(ok, html) {
   const s = $('status');
   s.className = 'status show ' + (ok ? 'ok' : 'err');
   s.innerHTML = html;
   s.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+function hideStatus() {
+  $('status').className = 'status';
 }
 
 /* modal ยืนยันแทน confirm() ของเบราว์เซอร์ — คืนค่า Promise<boolean> */
@@ -422,6 +479,7 @@ function askConfirm({ title, message, okText = 'ยืนยัน' }) {
   });
 }
 
+/* --- api --- */
 async function api(method, payloadOrQuery) {
   const key = $('key').value.trim();
   const opts = { method, headers: { 'Authorization': 'Bearer ' + key } };
@@ -437,7 +495,68 @@ async function api(method, payloadOrQuery) {
   return data;
 }
 
-$('submitBtn').addEventListener('click', async () => {
+/* --- wizard --- */
+function goStep(n) {
+  step = n;
+  document.querySelectorAll('.step-panel').forEach((p, i) => p.classList.toggle('active', i === n - 1));
+  document.querySelectorAll('.step-dot').forEach((d, i) => {
+    d.classList.toggle('active', i === n - 1);
+    d.classList.toggle('done', i < n - 1);
+  });
+  $('backBtn').style.visibility = n === 1 ? 'hidden' : 'visible';
+  $('nextBtn').textContent = n === 4 ? '⬆️ อัปโหลด' : 'ถัดไป ›';
+  if (n === 4) renderSummary();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function validateStep(n) {
+  if (n === 1 && !$('key').value.trim()) {
+    showStatus(false, '❌ ใส่ key ก่อน');
+    return false;
+  }
+  if (n === 2) {
+    const book = selectedBook();
+    const id = book ? book.id : $('bookId').value.trim().toLowerCase();
+    if (!id) { showStatus(false, '❌ กรอก id ของหนังสือก่อน'); return false; }
+    if (!book && !/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) {
+      showStatus(false, '❌ id ต้องเป็นตัวพิมพ์เล็ก a-z, 0-9, ขีดกลาง เช่น calculus-1');
+      return false;
+    }
+  }
+  if (n === 3) {
+    if (!$('content').value.trim()) { showStatus(false, '❌ ยังไม่มีเนื้อหา'); return false; }
+    if (!currentParts() && !$('chTitle').value.trim()) { showStatus(false, '❌ กรอกชื่อบทก่อน'); return false; }
+  }
+  return true;
+}
+
+function renderSummary() {
+  const book = selectedBook();
+  const id = book ? book.id : $('bookId').value.trim().toLowerCase();
+  const title = book ? book.title : ($('bookTitle').value.trim() || id);
+  const cover = book ? (book.cover || '📘') : $('bookCover').textContent.trim();
+  const parts = currentParts();
+  const base = book ? book.chapters.length : 0;
+
+  let rows, warn = '';
+  if (parts) {
+    rows = parts.map((p, i) =>
+      `<div class="chapter-row"><span class="file">${String(base + i + 1).padStart(2, '0')}</span><span>${esc(p.title)}</span></div>`
+    ).join('');
+  } else {
+    const fn = $('filename').value.trim();
+    const dupe = book && book.chapters.find(c => c.file === fn);
+    rows = `<div class="chapter-row"><span class="file">${esc(fn)}</span><span>${esc($('chTitle').value.trim())}</span></div>`;
+    if (dupe) warn = `<p class="hint" style="color:#d04545">⚠️ ชื่อไฟล์ซ้ำกับบท "${esc(dupe.title)}" — อัปโหลดจะเขียนทับบทนั้น (ระบบจะถามยืนยันอีกครั้ง)</p>`;
+  }
+
+  $('summary').innerHTML = `
+    <p class="cover-line">${esc(cover)} <strong>${esc(title)}</strong> <span class="hint" style="display:inline">(${esc(id)})${book ? '' : ' — เล่มใหม่'}</span></p>
+    <label>${parts ? `จะเพิ่ม ${parts.length} บท:` : 'จะเพิ่ม/อัปเดต 1 บท:'}</label>
+    ${rows}${warn}`;
+}
+
+async function doUpload() {
   const book = selectedBook();
   const bookMeta = {
     bookId: book ? book.id : $('bookId').value.trim().toLowerCase(),
@@ -446,12 +565,7 @@ $('submitBtn').addEventListener('click', async () => {
     bookDescription: book ? undefined : $('bookDesc').value.trim(),
   };
   const content = $('content').value;
-  if (!bookMeta.bookId) return showStatus(false, '❌ กรอก id ของหนังสือก่อน');
-  if (!content.trim()) return showStatus(false, '❌ ยังไม่มีเนื้อหา');
-  if (!$('key').value.trim()) return showStatus(false, '❌ ใส่ key ก่อน');
-
   const parts = currentParts();
-  if (!parts && !$('chTitle').value.trim()) return showStatus(false, '❌ กรอกชื่อบทก่อน');
 
   // กันเขียนทับบทเดิมโดยไม่ตั้งใจ (ชื่อไฟล์ซ้ำ = ระบบถือว่าเป็นการแก้ไขบทนั้น)
   if (!parts && book) {
@@ -459,14 +573,15 @@ $('submitBtn').addEventListener('click', async () => {
     const dupe = book.chapters.find(c => c.file === fn);
     if (dupe && !(await askConfirm({
       title: '⚠️ เขียนทับบทเดิม?',
-      message: `มีบท "${dupe.title}" ใช้ชื่อไฟล์ ${fn} อยู่แล้ว\nอัปโหลดต่อ = แทนที่เนื้อหาบทนั้นถาวร\nถ้าตั้งใจเพิ่มบทใหม่ ให้ยกเลิกแล้วแก้ชื่อไฟล์ไม่ให้ซ้ำ`,
+      message: `มีบท "${dupe.title}" ใช้ชื่อไฟล์ ${fn} อยู่แล้ว\nอัปโหลดต่อ = แทนที่เนื้อหาบทนั้นถาวร\nถ้าตั้งใจเพิ่มบทใหม่ ให้ยกเลิกแล้วกลับไปแก้ชื่อไฟล์ในขั้นที่ 3`,
       okText: 'เขียนทับ',
     }))) {
-      return showStatus(false, 'ยกเลิกการเขียนทับแล้ว — แก้ "ชื่อไฟล์" ให้ไม่ซ้ำ แล้วอัปโหลดใหม่จะกลายเป็นบทใหม่แทน');
+      return showStatus(false, 'ยกเลิกการเขียนทับแล้ว — กด ‹ ย้อนกลับ ไปแก้ "ชื่อไฟล์" ให้ไม่ซ้ำ');
     }
   }
 
-  $('submitBtn').disabled = true;
+  $('nextBtn').disabled = true;
+  $('backBtn').disabled = true;
   try {
     let firstCh = 1, doneBook = bookMeta.bookId;
     if (!parts) {
@@ -495,7 +610,9 @@ $('submitBtn').addEventListener('click', async () => {
     }
     localStorage.setItem('ebook:apikey', $('key').value.trim());
     const label = parts ? `ครบ ${parts.length} บท` : 'เรียบร้อย';
-    showStatus(true, `✅ อัปโหลด${label} — <a href="reader.html?book=${encodeURIComponent(doneBook)}&ch=${firstCh}">เปิดอ่าน ›</a>`);
+    showStatus(true,
+      `✅ อัปโหลด${label} — <a href="reader.html?book=${encodeURIComponent(doneBook)}&ch=${firstCh}">เปิดอ่าน ›</a> ` +
+      `หรือใส่เนื้อหาบทถัดไปได้เลย`);
     $('content').value = '';
     $('chTitle').value = '';
     $('file').value = '';
@@ -504,14 +621,30 @@ $('submitBtn').addEventListener('click', async () => {
     await refreshBooks();
     $('bookSelect').value = doneBook;
     renderBookUI();
+    goStep(3); // พร้อมเพิ่มบทถัดไปทันที
   } catch (e) {
-    const extra = currentParts() ? ' — บทที่อัปโหลดผ่านไปแล้วยังอยู่ ดูรายการบทของหนังสือแล้วค่อยอัปโหลดส่วนที่ขาด' : '';
+    const extra = parts ? ' — บทที่อัปโหลดผ่านไปแล้วยังอยู่ ย้อนกลับไปดูรายการบทในขั้นที่ 2 แล้วอัปโหลดส่วนที่ขาด' : '';
     showStatus(false, '❌ ' + esc(e.message) + extra);
   } finally {
-    $('submitBtn').disabled = false;
+    $('nextBtn').disabled = false;
+    $('backBtn').disabled = false;
+  }
+}
+
+$('nextBtn').addEventListener('click', () => {
+  hideStatus();
+  if (step < 4) {
+    if (validateStep(step)) goStep(step + 1);
+  } else {
+    doUpload();
   }
 });
+$('backBtn').addEventListener('click', () => {
+  hideStatus();
+  if (step > 1) goStep(step - 1);
+});
 
+/* --- ลบบท / ลบเล่ม --- */
 async function removeChapter(bookId, file) {
   if (!(await askConfirm({
     title: 'ลบบทนี้?',
@@ -544,7 +677,10 @@ async function removeBook(bookId) {
   }
 }
 
-refreshBooks();
+/* --- เริ่มต้น: ถ้าเครื่องจำ key ไว้แล้ว ข้ามขั้นที่ 1 ให้เลย --- */
+refreshBooks().then(() => {
+  goStep($('key').value.trim() ? 2 : 1);
+});
 </script>
 </body>
 </html>
