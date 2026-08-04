@@ -1,0 +1,60 @@
+<h1>วิธีเพิ่มหนังสือเล่มใหม่</h1>
+
+<p>หนังสือหนึ่งเล่ม = โฟลเดอร์หนึ่งโฟลเดอร์ใน <code>books/</code> ที่ข้างในมีไฟล์ HTML บทละไฟล์ แล้วลงทะเบียนไว้ในฐานข้อมูล <code>books.html</code> เท่านั้นเอง — ทั้ง repo นี้เป็นไฟล์ HTML ล้วน ไม่มี JSON ไม่มี build</p>
+
+<h2>ขั้นตอน</h2>
+
+<ol>
+  <li>สร้างโฟลเดอร์ใหม่ เช่น <code>books/linear-algebra/</code></li>
+  <li>ใส่ไฟล์บทเรียนเป็น HTML เช่น <code>01-vectors.html</code>, <code>02-matrices.html</code></li>
+  <li>เพิ่ม <code>&lt;section class="book"&gt;</code> ต่อท้ายใน <code>books.html</code> (ก่อนปิด <code>&lt;/main&gt;</code>):</li>
+</ol>
+
+<pre><code>&lt;section class="book" data-id="linear-algebra" data-cover="🧮"&gt;
+  &lt;h2&gt;Linear Algebra สรุปจากคาบเรียน&lt;/h2&gt;
+  &lt;p&gt;สรุปเนื้อหาพีชคณิตเชิงเส้น เทอม 1/2569&lt;/p&gt;
+  &lt;ol&gt;
+    &lt;li&gt;&lt;a href="books/linear-algebra/01-vectors.html"&gt;บทที่ 1 เวกเตอร์&lt;/a&gt;&lt;/li&gt;
+    &lt;li&gt;&lt;a href="books/linear-algebra/02-matrices.html"&gt;บทที่ 2 เมทริกซ์&lt;/a&gt;&lt;/li&gt;
+  &lt;/ol&gt;
+&lt;/section&gt;</code></pre>
+
+<div class="note">
+<p><code>data-id</code> ต้องตรงกับชื่อโฟลเดอร์ใน <code>books/</code> และห้ามซ้ำกับเล่มอื่น เพราะใช้เก็บความคืบหน้าการอ่าน ส่วน <code>data-cover</code> เป็นอีโมจิอะไรก็ได้ ลำดับบทเรียงตามลำดับ <code>&lt;li&gt;</code></p>
+</div>
+
+<div class="tip">
+<p>เปิด <code>books.html</code> ตรง ๆ ก็ได้หน้ารายการหนังสือที่คลิกดูไฟล์ดิบแต่ละบทได้เลย — ฐานข้อมูลกับหน้าสารบัญรวมคือไฟล์เดียวกัน</p>
+</div>
+
+<h2>รูปแบบไฟล์เนื้อหา</h2>
+
+<p>ไฟล์บทเรียนเป็นได้ 2 แบบ reader ดูจากนามสกุลไฟล์:</p>
+
+<ul>
+  <li><strong>.md (แนะนำ)</strong> — markdown ธรรมดา เริ่มด้วย <code># ชื่อบท</code> ใช้ตาราง code fence ได้หมด กล่องเน้นข้อความใช้ GitHub callout: <code>&gt; [!NOTE]</code>, <code>&gt; [!TIP]</code>, <code>&gt; [!WARNING]</code> — ดูตัวอย่างที่บทถัดไป</li>
+  <li><strong>.html</strong> — HTML fragment <strong>ไม่ต้องใส่ CSS/JavaScript</strong> เริ่มด้วย <code>&lt;h1&gt;</code> กล่องเน้นข้อความใช้ <code>&lt;div class="note"&gt;</code>, <code>&lt;div class="tip"&gt;</code>, <code>&lt;div class="warning"&gt;</code></li>
+</ul>
+
+<h2>ตัวอย่าง prompt สำหรับให้ AI สร้างบทเรียน</h2>
+
+<blockquote>
+<p>ช่วยสรุปเนื้อหาเรื่อง [หัวข้อ] จากไฟล์/โน้ตที่แนบมา แล้วเขียนเป็นไฟล์ HTML สำหรับ ebook ของฉัน โดยมีเงื่อนไข: เขียนเป็น HTML fragment ไม่ต้องมี CSS/JS, เริ่มด้วย &lt;h1&gt; ชื่อบท, แบ่งหัวข้อด้วย h2/h3, ใช้ &lt;div class="note"&gt; / &lt;div class="tip"&gt; / &lt;div class="warning"&gt; สำหรับจุดที่ควรเน้น, โค้ดใส่ใน &lt;pre&gt;&lt;code&gt; แล้วบันทึกไฟล์ไว้ที่ books/[id]/[เลขลำดับ]-[ชื่อบท].html พร้อมเพิ่มลิงก์บทใน &lt;section class="book"&gt; ของหนังสือเล่มนั้นใน books.html ให้ด้วย</p>
+</blockquote>
+
+<div class="tip">
+<p>ถ้าใช้ Claude Code อยู่แล้ว แค่บอกว่า "เพิ่มบทใหม่เรื่อง X ในหนังสือ Y" มันจะอ่าน README ของ repo นี้แล้วทำให้ถูกรูปแบบเอง</p>
+</div>
+
+<h2>วิธีเปิดอ่าน</h2>
+
+<p>เนื้อหาโหลดผ่าน <code>fetch</code> จึงต้องเปิดผ่านเว็บเซิร์ฟเวอร์ (เปิดไฟล์ตรง ๆ แบบ file:// ไม่ได้):</p>
+
+<pre><code># รันในโฟลเดอร์ EbookMe
+python3 -m http.server 8000</code></pre>
+
+<p>แล้วเปิด <code>http://localhost:8000</code> — ถ้าอยากอ่านจากมือถือในบ้าน ให้เปิด <code>http://[IP ของคอม]:8000</code> ผ่าน Wi-Fi วงเดียวกัน</p>
+
+<div class="note">
+<p>ถ้าอยากอ่านจากที่ไหนก็ได้ push ขึ้น GitHub แล้วเปิด <strong>GitHub Pages</strong> (Settings → Pages → เลือก branch) เพราะทั้งเว็บเป็น static file ล้วน ๆ ใช้ได้ทันทีไม่ต้อง build</p>
+</div>

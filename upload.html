@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>☁️ อัปโหลดหนังสือ — EbookMe</title>
+<script>
+  (function () {
+    var t = localStorage.getItem('ebook:theme');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<link rel="stylesheet" href="assets/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☁️</text></svg>">
+<style>
+  .form-main {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: 1.25rem max(1rem, env(safe-area-inset-right)) 4rem max(1rem, env(safe-area-inset-left));
+    display: grid;
+    gap: 1rem;
+  }
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.1rem 1.25rem;
+  }
+  .card h2 { margin: 0; font-size: 1rem; }
+  .card label { display: block; font-size: 0.85rem; color: var(--text-dim); margin: 0.8rem 0 0.3rem; }
+  .card input[type="text"], .card input[type="password"], .card textarea, .card select {
+    width: 100%;
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+    box-sizing: border-box;
+  }
+  .card textarea { min-height: 13rem; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.6; }
+  .card .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+  @media (max-width: 480px) { .card .row { grid-template-columns: 1fr; } }
+  .hint { font-size: 0.8rem; color: var(--text-dim); margin: 0.35rem 0 0; }
+  .status { border-radius: 10px; padding: 0.8rem 1rem; font-size: 0.92rem; display: none; }
+  .status.show { display: block; }
+  .status.ok { background: var(--tip-bg); border: 1px solid var(--tip-bd); }
+  .status.err { background: var(--warn-bg); border: 1px solid var(--warn-bd); }
+  .chapter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.88rem;
+  }
+  .chapter-row:last-of-type { border-bottom: none; }
+  .chapter-row .file { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-dim); flex-shrink: 0; }
+  .chapter-row .del { margin-left: auto; color: #d04545; min-height: 2rem; min-width: 2rem; }
+  .banner {
+    background: var(--note-bg);
+    border: 1px solid var(--note-bd);
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+    font-size: 0.9rem;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="btn" href="index.html" title="กลับชั้นหนังสือ">←</a>
+  <span class="title">☁️ อัปโหลดหนังสือขึ้นคลาวด์</span>
+</header>
+
+<main class="form-main">
+
+  <div class="banner" id="offlineBanner">
+    ⚠️ ติดต่อ API ไม่ได้ — หน้านี้ใช้งานได้เมื่อเว็บ deploy บน Vercel และตั้งค่า Blob store + <code>UPLOAD_KEY</code> แล้วเท่านั้น (ดูขั้นตอนใน README) ยังกรอกฟอร์มทดลองดูได้แต่จะอัปโหลดไม่สำเร็จ
+  </div>
+
+  <div class="card">
+    <h2>🔑 Key</h2>
+    <label for="key">key สำหรับอัปโหลด (ค่า <code>UPLOAD_KEY</code> ที่ตั้งไว้บน Vercel)</label>
+    <input type="password" id="key" autocomplete="off" placeholder="วาง key ที่นี่">
+    <p class="hint">อัปโหลดสำเร็จครั้งแรกแล้ว เครื่องนี้จะจำ key ให้อัตโนมัติ (เก็บใน localStorage ผูกกับโดเมนนี้เท่านั้น ไม่ส่งไปไหน)</p>
+  </div>
+
+  <div class="card">
+    <h2>📚 หนังสือปลายทาง</h2>
+    <label for="bookSelect">เลือกหนังสือ</label>
+    <select id="bookSelect"><option value="__new__">➕ สร้างเล่มใหม่…</option></select>
+    <div id="newBookFields">
+      <div class="row">
+        <div>
+          <label for="bookId">id (a-z, 0-9, ขีดกลาง)</label>
+          <input type="text" id="bookId" placeholder="calculus-1">
+        </div>
+        <div>
+          <label for="bookCover">อีโมจิหน้าปก</label>
+          <input type="text" id="bookCover" placeholder="📘">
+        </div>
+      </div>
+      <label for="bookTitle">ชื่อหนังสือ</label>
+      <input type="text" id="bookTitle" placeholder="Calculus 1 สรุปจากคาบเรียน">
+      <label for="bookDesc">คำอธิบายสั้น ๆ</label>
+      <input type="text" id="bookDesc" placeholder="หนึ่งประโยคว่าเล่มนี้เกี่ยวกับอะไร">
+    </div>
+    <div id="chapterList"></div>
+  </div>
+
+  <div class="card">
+    <h2>📄 บทที่จะอัปโหลด</h2>
+    <label for="file">เลือกไฟล์ .md / .html จากเครื่อง (หรือวางเนื้อหาในช่องล่างเองก็ได้)</label>
+    <input type="file" id="file" accept=".md,.markdown,.html">
+    <label for="chTitle">ชื่อบท</label>
+    <input type="text" id="chTitle" placeholder="บทที่ 1 ลิมิตและความต่อเนื่อง">
+    <label for="filename">ชื่อไฟล์ (ตั้งให้อัตโนมัติ แก้ได้)</label>
+    <input type="text" id="filename" placeholder="01-chapter.md">
+    <label for="content">เนื้อหา (markdown หรือ HTML)</label>
+    <textarea id="content" placeholder="# บทที่ 1 …&#10;&#10;วางเนื้อหาที่ได้จาก AI ตรงนี้ได้เลย"></textarea>
+  </div>
+
+  <button class="btn primary" id="submitBtn" style="justify-self:start">⬆️ อัปโหลด</button>
+  <div class="status" id="status"></div>
+
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let cloudBooks = [];
+let filenameDirty = false;
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+$('key').value = localStorage.getItem('ebook:apikey') || '';
+
+function selectedBook() {
+  const v = $('bookSelect').value;
+  return v === '__new__' ? null : cloudBooks.find(b => b.id === v) || null;
+}
+
+function slugify(t) {
+  return String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+
+function suggestFilename() {
+  if (filenameDirty) return;
+  const book = selectedBook();
+  const n = (book ? book.chapters.length : 0) + 1;
+  const slug = slugify($('chTitle').value) || 'chapter';
+  $('filename').value = String(n).padStart(2, '0') + '-' + slug + '.md';
+}
+
+function renderBookUI() {
+  const book = selectedBook();
+  $('newBookFields').style.display = book ? 'none' : '';
+  const list = $('chapterList');
+  if (!book) { list.innerHTML = ''; suggestFilename(); return; }
+
+  list.innerHTML =
+    '<label>บทที่มีอยู่ (✕ = ลบบทนั้น)</label>' +
+    book.chapters.map(c => `
+      <div class="chapter-row">
+        <span class="file">${esc(c.file)}</span>
+        <span>${esc(c.title)}</span>
+        <button class="btn del" data-file="${esc(c.file)}" title="ลบบทนี้">✕</button>
+      </div>`).join('') +
+    '<p class="hint" style="margin-top:0.6rem"><button class="btn" id="delBook" style="color:#d04545;font-size:0.85rem">🗑️ ลบหนังสือทั้งเล่ม</button></p>';
+
+  list.querySelectorAll('.del').forEach(btn => {
+    btn.onclick = () => removeChapter(book.id, btn.dataset.file);
+  });
+  list.querySelector('#delBook').onclick = () => removeBook(book.id);
+  suggestFilename();
+}
+
+async function refreshBooks() {
+  try {
+    const res = await fetch('api/books', { cache: 'no-store', signal: AbortSignal.timeout(6000) });
+    if (!res.ok || !(res.headers.get('content-type') || '').includes('json')) throw 0;
+    const data = await res.json();
+    cloudBooks = data.books || [];
+    $('offlineBanner').style.display = 'none';
+  } catch {
+    cloudBooks = [];
+    $('offlineBanner').style.display = 'block';
+  }
+  const sel = $('bookSelect');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="__new__">➕ สร้างเล่มใหม่…</option>' +
+    cloudBooks.map(b => `<option value="${esc(b.id)}">${esc(b.cover || '📘')} ${esc(b.title)}</option>`).join('');
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+  renderBookUI();
+}
+
+$('bookSelect').onchange = renderBookUI;
+$('chTitle').addEventListener('input', suggestFilename);
+$('filename').addEventListener('input', () => { filenameDirty = true; });
+
+$('file').addEventListener('change', async () => {
+  const f = $('file').files[0];
+  if (!f) return;
+  $('content').value = await f.text();
+  $('filename').value = f.name;
+  filenameDirty = true;
+  if (!$('chTitle').value) {
+    const m = $('content').value.match(/^#\s+(.+)$/m) || $('content').value.match(/<h1[^>]*>(.*?)<\/h1>/i);
+    if (m) $('chTitle').value = m[1].replace(/<[^>]+>/g, '').trim();
+  }
+});
+
+function showStatus(ok, html) {
+  const s = $('status');
+  s.className = 'status show ' + (ok ? 'ok' : 'err');
+  s.innerHTML = html;
+}
+
+async function api(method, payloadOrQuery) {
+  const key = $('key').value.trim();
+  const opts = { method, headers: { 'Authorization': 'Bearer ' + key } };
+  let url = 'api/books';
+  if (method === 'POST') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(payloadOrQuery);
+  }
+  if (method === 'DELETE') url += '?' + new URLSearchParams(payloadOrQuery);
+  const res = await fetch(url, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+$('submitBtn').addEventListener('click', async () => {
+  const book = selectedBook();
+  const payload = {
+    bookId: book ? book.id : $('bookId').value.trim().toLowerCase(),
+    bookTitle: book ? undefined : $('bookTitle').value.trim(),
+    bookCover: book ? undefined : $('bookCover').value.trim(),
+    bookDescription: book ? undefined : $('bookDesc').value.trim(),
+    chapterTitle: $('chTitle').value.trim(),
+    filename: $('filename').value.trim(),
+    content: $('content').value,
+  };
+  if (!payload.bookId) return showStatus(false, '❌ กรอก id ของหนังสือก่อน');
+  if (!payload.chapterTitle) return showStatus(false, '❌ กรอกชื่อบทก่อน');
+  if (!payload.content.trim()) return showStatus(false, '❌ ยังไม่มีเนื้อหา');
+  if (!$('key').value.trim()) return showStatus(false, '❌ ใส่ key ก่อน');
+
+  $('submitBtn').disabled = true;
+  showStatus(true, '⏳ กำลังอัปโหลด…');
+  try {
+    const r = await api('POST', payload);
+    localStorage.setItem('ebook:apikey', $('key').value.trim());
+    showStatus(true, `✅ อัปโหลดเรียบร้อย — <a href="reader.html?book=${encodeURIComponent(r.book)}&ch=${r.ch}">เปิดอ่านบทนี้ ›</a>`);
+    $('content').value = '';
+    $('chTitle').value = '';
+    $('file').value = '';
+    filenameDirty = false;
+    await refreshBooks();
+    $('bookSelect').value = r.book;
+    renderBookUI();
+  } catch (e) {
+    showStatus(false, '❌ ' + esc(e.message));
+  } finally {
+    $('submitBtn').disabled = false;
+  }
+});
+
+async function removeChapter(bookId, file) {
+  if (!confirm(`ลบบท ${file} ?`)) return;
+  try {
+    await api('DELETE', { bookId, file });
+    localStorage.setItem('ebook:apikey', $('key').value.trim());
+    showStatus(true, '✅ ลบแล้ว');
+    await refreshBooks();
+  } catch (e) {
+    showStatus(false, '❌ ' + esc(e.message));
+  }
+}
+
+async function removeBook(bookId) {
+  if (!confirm(`ลบหนังสือ "${bookId}" ทั้งเล่ม? บททั้งหมดจะหายถาวร`)) return;
+  try {
+    await api('DELETE', { bookId });
+    $('bookSelect').value = '__new__';
+    showStatus(true, '✅ ลบทั้งเล่มแล้ว');
+    await refreshBooks();
+  } catch (e) {
+    showStatus(false, '❌ ' + esc(e.message));
+  }
+}
+
+refreshBooks();
+</script>
+</body>
+</html>

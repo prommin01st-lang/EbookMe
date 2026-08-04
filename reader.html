@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EbookMe</title>
+<script>
+  (function () {
+    var t = localStorage.getItem('ebook:theme');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+    var fs = parseInt(localStorage.getItem('ebook:fontSize'), 10);
+    if (fs >= 14 && fs <= 26) document.documentElement.style.setProperty('--reader-font', fs + 'px');
+  })();
+</script>
+<link rel="stylesheet" href="assets/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+</head>
+<body>
+
+<div class="read-progress" id="readProgress"></div>
+
+<header class="topbar">
+  <a class="btn" href="index.html" title="กลับชั้นหนังสือ">←</a>
+  <span class="title" id="barTitle">กำลังโหลด…</span>
+  <button class="btn" id="fontDown" title="ลดขนาดตัวอักษร" style="font-size:0.85rem">A−</button>
+  <button class="btn" id="fontUp" title="เพิ่มขนาดตัวอักษร" style="font-size:1.15rem">A+</button>
+  <button class="btn" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
+  <button class="btn" id="tocBtn" title="สารบัญ">☰</button>
+</header>
+
+<main class="reader-main">
+  <article class="content" id="content">
+    <div class="loading">กำลังโหลดเนื้อหา…</div>
+  </article>
+</main>
+
+<nav class="bottombar">
+  <button class="btn" id="prevBtn">‹ บทก่อนหน้า</button>
+  <button class="btn chapter-pos" id="posBtn" style="font-weight:400"></button>
+  <button class="btn" id="nextBtn">บทถัดไป ›</button>
+</nav>
+
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<aside class="drawer">
+  <header>
+    <span>สารบัญ</span>
+    <button class="btn" id="drawerClose">✕</button>
+  </header>
+  <ol id="tocList"></ol>
+</aside>
+
+<script src="assets/marked.min.js"></script>
+<script src="assets/catalog.js"></script>
+<script>
+const THEMES = ['light', 'sepia', 'dark'];
+const THEME_ICON = { light: '☀️', sepia: '📖', dark: '🌙' };
+const $ = id => document.getElementById(id);
+
+history.scrollRestoration = 'manual';
+
+const params = new URLSearchParams(location.search);
+const bookId = params.get('book');
+if (!bookId) location.replace('index.html');
+
+let book = null;
+let ch = 1;      // 1-based
+let ready = false; // กันการบันทึกตำแหน่ง/นับจบบท ก่อนเนื้อหาโหลดเสร็จ
+
+/* ---------- theme & font size ---------- */
+
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem('ebook:theme', t);
+  $('themeBtn').textContent = THEME_ICON[t];
+}
+$('themeBtn').textContent = THEME_ICON[document.documentElement.dataset.theme] || '🌙';
+$('themeBtn').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme;
+  applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+});
+
+function fontSize() {
+  const v = parseInt(localStorage.getItem('ebook:fontSize'), 10);
+  return (v >= 14 && v <= 26) ? v : 17;
+}
+function setFontSize(px) {
+  px = Math.min(26, Math.max(14, px));
+  localStorage.setItem('ebook:fontSize', px);
+  document.documentElement.style.setProperty('--reader-font', px + 'px');
+}
+$('fontUp').addEventListener('click', () => setFontSize(fontSize() + 1));
+$('fontDown').addEventListener('click', () => setFontSize(fontSize() - 1));
+
+/* ---------- drawer ---------- */
+
+function toggleDrawer(open) {
+  document.body.classList.toggle('drawer-open', open);
+}
+$('tocBtn').addEventListener('click', () => toggleDrawer(true));
+$('posBtn').addEventListener('click', () => toggleDrawer(true));
+$('drawerClose').addEventListener('click', () => toggleDrawer(false));
+$('drawerOverlay').addEventListener('click', () => toggleDrawer(false));
+
+/* ---------- progress / bookmark helpers ---------- */
+
+const keyPos = () => `ebook:pos:${bookId}:${ch}`;
+const keyDone = () => `ebook:done:${bookId}`;
+
+function doneSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(keyDone()) || '[]')); }
+  catch { return new Set(); }
+}
+function markDone() {
+  const s = doneSet();
+  if (!s.has(ch)) {
+    s.add(ch);
+    localStorage.setItem(keyDone(), JSON.stringify([...s]));
+  }
+}
+
+function scrollRatio() {
+  const el = document.scrollingElement;
+  const max = el.scrollHeight - el.clientHeight;
+  return max <= 0 ? 1 : el.scrollTop / max;
+}
+
+let saveTimer = null;
+function onScroll() {
+  if (!ready) return;
+  const r = scrollRatio();
+  $('readProgress').style.width = (r * 100) + '%';
+  if (r >= 0.9) markDone();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => localStorage.setItem(keyPos(), r.toFixed(4)), 250);
+}
+addEventListener('scroll', onScroll, { passive: true });
+addEventListener('pagehide', () => {
+  if (ready) localStorage.setItem(keyPos(), scrollRatio().toFixed(4));
+});
+
+/* ---------- rendering ---------- */
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function chapterUrl(n) {
+  return `reader.html?book=${encodeURIComponent(bookId)}&ch=${n}`;
+}
+
+// แปลง GitHub-style callout (> [!NOTE] ฯลฯ) เป็นกล่อง note/tip/warning
+function convertCallouts(root) {
+  const map = { NOTE: 'note', TIP: 'tip', WARNING: 'warning', IMPORTANT: 'note', CAUTION: 'warning' };
+  root.querySelectorAll('blockquote').forEach(bq => {
+    const p = bq.querySelector('p');
+    const m = p && p.textContent.match(/^\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]/i);
+    if (!m) return;
+    p.innerHTML = p.innerHTML.replace(/^\[!\w+\]\s*(<br\s*\/?>\s*)?/i, '');
+    if (!p.textContent.trim() && !p.querySelector('*')) p.remove();
+    const div = document.createElement('div');
+    div.className = map[m[1].toUpperCase()];
+    div.innerHTML = bq.innerHTML;
+    bq.replaceWith(div);
+  });
+}
+
+function renderToc() {
+  const done = doneSet();
+  $('tocList').innerHTML = book.chapters.map((c, i) => `
+    <li><a href="${chapterUrl(i + 1)}" class="${i + 1 === ch ? 'current' : ''}">
+      <span class="num">${i + 1}</span>
+      <span>${esc(c.title)}</span>
+      ${done.has(i + 1) ? '<span class="done">✓</span>' : ''}
+    </a></li>`).join('');
+}
+
+function renderNav() {
+  const total = book.chapters.length;
+  $('posBtn').textContent = `บทที่ ${ch}/${total}`;
+  $('prevBtn').disabled = ch <= 1;
+  $('nextBtn').disabled = ch >= total;
+  $('prevBtn').onclick = () => { if (ch > 1) location.href = chapterUrl(ch - 1); };
+  $('nextBtn').onclick = () => { if (ch < total) location.href = chapterUrl(ch + 1); };
+}
+
+addEventListener('keydown', e => {
+  if (e.target.closest('input, textarea')) return;
+  if (e.key === 'ArrowLeft' && ch > 1) location.href = chapterUrl(ch - 1);
+  if (e.key === 'ArrowRight' && book && ch < book.chapters.length) location.href = chapterUrl(ch + 1);
+});
+
+async function load() {
+  const content = $('content');
+  let books;
+  try {
+    books = await loadCatalog();
+  } catch (e) {
+    content.innerHTML = `<div class="content-error">โหลด <code>books.html</code> ไม่สำเร็จ —
+      ต้องเปิดผ่านเซิร์ฟเวอร์ เช่น <code>python3 -m http.server 8000</code></div>`;
+    return;
+  }
+
+  book = books.find(b => b.id === bookId);
+  if (!book || !book.chapters.length) {
+    content.innerHTML = `<div class="content-error">ไม่พบหนังสือ "${esc(bookId)}" ใน books.html</div>`;
+    return;
+  }
+
+  ch = parseInt(params.get('ch'), 10);
+  if (!(ch >= 1 && ch <= book.chapters.length)) ch = 1;
+  localStorage.setItem('ebook:last:' + bookId, ch);
+
+  const chapter = book.chapters[ch - 1];
+  document.title = `${chapter.title} — ${book.title}`;
+  $('barTitle').innerHTML = `${esc(chapter.title)}<small>${esc(book.title)}</small>`;
+  renderToc();
+  renderNav();
+
+  let raw;
+  try {
+    const res = await fetch(chapter.path, { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    raw = await res.text();
+  } catch (e) {
+    content.innerHTML = `<div class="content-error">โหลดไฟล์ <code>${esc(chapter.path)}</code> ไม่สำเร็จ</div>`;
+    return;
+  }
+
+  if (/\.md([?#].*)?$/i.test(chapter.path)) {
+    // ไฟล์ markdown — แปลงเป็น HTML ด้วย marked
+    content.innerHTML = marked.parse(raw);
+    convertCallouts(content);
+  } else {
+    // ไฟล์ HTML — รองรับทั้งไฟล์เต็ม (เอาเฉพาะ body) และ fragment
+    const doc = new DOMParser().parseFromString(raw, 'text/html');
+    content.innerHTML = doc.body.innerHTML;
+  }
+
+  // ตารางกว้าง ๆ ให้เลื่อนแนวนอนได้ในกรอบตัวเอง
+  content.querySelectorAll('table').forEach(t => {
+    if (t.parentElement.classList.contains('table-wrap')) return;
+    const w = document.createElement('div');
+    w.className = 'table-wrap';
+    t.before(w);
+    w.append(t);
+  });
+
+  // ลิงก์ออกนอกให้เปิดแท็บใหม่
+  content.querySelectorAll('a[href^="http"]').forEach(a => {
+    a.target = '_blank';
+    a.rel = 'noopener';
+  });
+
+  // คืนตำแหน่งอ่านล่าสุดของบทนี้
+  const saved = parseFloat(localStorage.getItem(keyPos()));
+  requestAnimationFrame(() => {
+    if (saved > 0.01 && saved < 0.99) {
+      const el = document.scrollingElement;
+      el.scrollTop = saved * (el.scrollHeight - el.clientHeight);
+    }
+    ready = true;
+    onScroll();
+  });
+}
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>📚 EbookMe — ชั้นหนังสือ</title>
+<script>
+  (function () {
+    var t = localStorage.getItem('ebook:theme');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<link rel="stylesheet" href="assets/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <span class="title" style="font-size:1.1rem">📚 EbookMe</span>
+  <a class="btn" href="upload.html" title="อัปโหลดหนังสือขึ้นคลาวด์">＋</a>
+  <button class="btn" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
+</header>
+
+<main class="shelf" id="shelf">
+  <div class="empty-state">กำลังโหลด…</div>
+</main>
+
+<script src="assets/catalog.js"></script>
+<script>
+const THEMES = ['light', 'sepia', 'dark'];
+const THEME_ICON = { light: '☀️', sepia: '📖', dark: '🌙' };
+
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem('ebook:theme', t);
+  document.getElementById('themeBtn').textContent = THEME_ICON[t];
+}
+
+document.getElementById('themeBtn').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme;
+  applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+});
+document.getElementById('themeBtn').textContent =
+  THEME_ICON[document.documentElement.dataset.theme] || '🌙';
+
+function doneCount(bookId, total) {
+  try {
+    const arr = JSON.parse(localStorage.getItem('ebook:done:' + bookId) || '[]');
+    return arr.filter(n => n >= 1 && n <= total).length;
+  } catch { return 0; }
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+async function loadShelf() {
+  const shelf = document.getElementById('shelf');
+  let books;
+  try {
+    books = await loadCatalog();
+  } catch (e) {
+    shelf.innerHTML = `<div class="error-state">
+      <p><strong>โหลด books.html ไม่สำเร็จ</strong></p>
+      <p>ถ้าเปิดไฟล์ตรง ๆ (file://) เบราว์เซอร์จะบล็อกการอ่านไฟล์ ต้องรันผ่านเซิร์ฟเวอร์ก่อน:</p>
+      <p><code>python3 -m http.server 8000</code> แล้วเปิด <code>http://localhost:8000</code></p>
+    </div>`;
+    return;
+  }
+
+  if (!books.length) {
+    shelf.innerHTML = `<div class="empty-state">ยังไม่มีหนังสือ — เพิ่ม <code>&lt;section class="book"&gt;</code> เล่มแรกใน <code>books.html</code> ได้เลย</div>`;
+    return;
+  }
+
+  shelf.innerHTML = books.map(b => {
+    const total = (b.chapters || []).length;
+    const done = doneCount(b.id, total);
+    const pct = total ? Math.round(done / total * 100) : 0;
+    const last = parseInt(localStorage.getItem('ebook:last:' + b.id), 10);
+    const startCh = (last >= 1 && last <= total) ? last : 1;
+    const label = last ? `อ่านต่อ บทที่ ${startCh} ›` : 'เริ่มอ่าน ›';
+    return `
+      <a class="book-card" href="reader.html?book=${encodeURIComponent(b.id)}&ch=${startCh}">
+        <span class="cover">${esc(b.cover || '📘')}</span>
+        <h2>${esc(b.title)}</h2>
+        <p>${esc(b.description || '')}</p>
+        <div class="progress-track"><div style="width:${pct}%"></div></div>
+        <div class="meta">
+          <span>${b.cloud ? '☁️ ' : ''}${done}/${total} บท</span>
+          <span class="continue">${label}</span>
+        </div>
+      </a>`;
+  }).join('');
+}
+
+loadShelf();
+</script>
+</body>
+</html>

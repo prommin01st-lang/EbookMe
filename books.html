@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>📚 ฐานข้อมูลหนังสือ — EbookMe</title>
+<script>
+  (function () {
+    var t = localStorage.getItem('ebook:theme');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .catalog { max-width: 44rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+  .catalog > h1 { font-size: 1.5rem; margin: 0 0 0.3rem; }
+  .catalog > .hint { color: var(--text-dim); font-size: 0.88rem; margin: 0 0 1.5rem; }
+  .catalog section.book {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin: 1rem 0;
+  }
+  .catalog section.book::before { content: attr(data-cover); display: block; font-size: 1.8rem; }
+  .catalog section.book h2 { margin: 0.3rem 0; font-size: 1.15rem; border: none; padding: 0; }
+  .catalog section.book > p { margin: 0 0 0.8rem; color: var(--text-dim); font-size: 0.9rem; }
+  .catalog section.book ol { margin: 0; padding-left: 1.5rem; }
+  .catalog section.book li { margin: 0.3rem 0; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+  ไฟล์นี้คือ "ฐานข้อมูล" ของ EbookMe — หนังสือหนึ่งเล่ม = <section class="book"> หนึ่งอัน
+
+  กติกา (สำหรับ AI: ทำตามนี้เป๊ะ ๆ):
+  - data-id     = ชื่อโฟลเดอร์ใน books/ (kebab-case ภาษาอังกฤษ ห้ามซ้ำ)
+  - data-cover  = อีโมจิหน้าปกหนึ่งตัว
+  - <h2>        = ชื่อหนังสือ
+  - <p> แรก     = คำอธิบายสั้น ๆ หนึ่งประโยค
+  - <ol> ลิงก์บทตามลำดับ href ชี้ไปที่ books/<id>/<ไฟล์>.html
+  เพิ่มเล่มใหม่ = ก๊อปปี้ section เดิมแล้วแก้ วางต่อท้ายก่อนปิด </main>
+============================================================ -->
+
+<main class="catalog">
+
+<h1>📚 ฐานข้อมูลหนังสือ</h1>
+<p class="hint">ไฟล์นี้คือฐานข้อมูลของ EbookMe — <a href="index.html">เปิดชั้นหนังสือ</a> เพื่ออ่านแบบเต็มรูปแบบ หรือคลิกลิงก์ด้านล่างเพื่อดูไฟล์ดิบของแต่ละบท</p>
+
+<section class="book" data-id="guide" data-cover="📗">
+  <h2>คู่มือการใช้งาน EbookMe</h2>
+  <p>วิธีอ่านหนังสือ วิธีเพิ่มหนังสือเล่มใหม่ และตัวอย่างการแสดงผลเนื้อหาทุกรูปแบบ</p>
+  <ol>
+    <li><a href="books/guide/01-how-to-read.html">วิธีใช้งานหน้าอ่าน</a></li>
+    <li><a href="books/guide/02-add-book.html">วิธีเพิ่มหนังสือเล่มใหม่</a></li>
+    <li><a href="books/guide/03-showcase.html">ตัวอย่างการแสดงผลเนื้อหา</a></li>
+    <li><a href="books/guide/04-markdown-demo.md">เขียนบทเรียนด้วย Markdown</a></li>
+  </ol>
+</section>
+
+</main>
+</body>
+</html>

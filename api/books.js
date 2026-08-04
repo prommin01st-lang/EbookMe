@@ -1,0 +1,129 @@
+/* API ฝั่งคลาวด์ของ EbookMe (รันเป็น Vercel Serverless Function)
+   - GET    /api/books                    → สารบัญหนังสือคลาวด์ (อ่านได้สาธารณะ)
+   - POST   /api/books                    → อัปโหลด/แก้ไขบท (ต้องแนบ key)
+   - DELETE /api/books?bookId=..[&file=..] → ลบบทหรือทั้งเล่ม (ต้องแนบ key)
+   ต้องตั้ง env บน Vercel: BLOB_READ_WRITE_TOKEN (จากการเชื่อม Blob store) และ UPLOAD_KEY */
+
+import crypto from 'node:crypto';
+import { put, del, list } from '@vercel/blob';
+
+const CATALOG_PATH = 'ebookme/catalog.json';
+
+function isAuthed(req) {
+  const secret = process.env.UPLOAD_KEY || '';
+  const h = String(req.headers['authorization'] || '');
+  const provided = h.replace(/^Bearer\s+/i, '') || String(req.headers['x-api-key'] || '');
+  if (!secret || !provided) return false;
+  const a = Buffer.from(provided), b = Buffer.from(secret);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+async function readCatalog() {
+  const { blobs } = await list({ prefix: CATALOG_PATH, limit: 1 });
+  if (!blobs.length) return { books: [] };
+  // ใส่ query กัน CDN cache เพื่อให้ได้สารบัญเวอร์ชันล่าสุดเสมอ
+  const res = await fetch(`${blobs[0].url}?v=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) return { books: [] };
+  return await res.json();
+}
+
+async function writeCatalog(catalog) {
+  await put(CATALOG_PATH, JSON.stringify(catalog, null, 2), {
+    access: 'public',
+    contentType: 'application/json; charset=utf-8',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+}
+
+export default async function handler(req, res) {
+  try {
+    if (req.method === 'GET') {
+      const catalog = await readCatalog();
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json(catalog);
+    }
+
+    if (!isAuthed(req)) {
+      return res.status(401).json({ error: 'key ไม่ถูกต้อง (หรือยังไม่ได้ตั้ง UPLOAD_KEY บน Vercel)' });
+    }
+
+    if (req.method === 'POST') {
+      const { bookId, bookTitle, bookCover, bookDescription, chapterTitle, filename, content } = req.body || {};
+
+      if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(bookId || ''))
+        return res.status(400).json({ error: 'bookId ต้องเป็นตัวพิมพ์เล็ก a-z, 0-9, ขีดกลาง' });
+      if (!/^[\w.-]+\.(md|html)$/i.test(filename || '') || filename.includes('..'))
+        return res.status(400).json({ error: 'filename ต้องลงท้ายด้วย .md หรือ .html และไม่มีตัวอักษรพิเศษ' });
+      if (!chapterTitle || !String(chapterTitle).trim())
+        return res.status(400).json({ error: 'ต้องมีชื่อบท' });
+      if (typeof content !== 'string' || !content.trim())
+        return res.status(400).json({ error: 'ไม่มีเนื้อหา' });
+      if (content.length > 2_000_000)
+        return res.status(400).json({ error: 'เนื้อหาใหญ่เกิน 2MB' });
+
+      const blob = await put(`ebookme/books/${bookId}/${filename}`, content, {
+        access: 'public',
+        contentType: filename.toLowerCase().endsWith('.md')
+          ? 'text/markdown; charset=utf-8'
+          : 'text/html; charset=utf-8',
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        cacheControlMaxAge: 60,
+      });
+
+      const catalog = await readCatalog();
+      let book = catalog.books.find(b => b.id === bookId);
+      if (!book) {
+        book = {
+          id: bookId,
+          title: (bookTitle || '').trim() || bookId,
+          description: (bookDescription || '').trim(),
+          cover: (bookCover || '').trim() || '📘',
+          chapters: [],
+        };
+        catalog.books.push(book);
+      }
+
+      const existing = book.chapters.find(c => c.file === filename);
+      if (existing) {
+        existing.title = chapterTitle.trim();
+        existing.url = blob.url;
+        existing.updated = Date.now();
+      } else {
+        book.chapters.push({ file: filename, title: chapterTitle.trim(), url: blob.url, updated: Date.now() });
+      }
+      // เรียงบทตามชื่อไฟล์ (ใช้ convention เลขนำหน้า 01-, 02-, …)
+      book.chapters.sort((a, b) => a.file.localeCompare(b.file, 'en', { numeric: true }));
+      await writeCatalog(catalog);
+
+      const ch = book.chapters.findIndex(c => c.file === filename) + 1;
+      return res.status(200).json({ ok: true, book: bookId, ch, url: blob.url });
+    }
+
+    if (req.method === 'DELETE') {
+      const { bookId, file } = req.query || {};
+      const catalog = await readCatalog();
+      const book = catalog.books.find(b => b.id === bookId);
+      if (!book) return res.status(404).json({ error: 'ไม่พบหนังสือ' });
+
+      if (file) {
+        const c = book.chapters.find(c => c.file === file);
+        if (!c) return res.status(404).json({ error: 'ไม่พบบทนี้' });
+        await del(c.url).catch(() => {});
+        book.chapters = book.chapters.filter(x => x !== c);
+        if (!book.chapters.length) catalog.books = catalog.books.filter(b => b !== book);
+      } else {
+        await Promise.all(book.chapters.map(c => del(c.url).catch(() => {})));
+        catalog.books = catalog.books.filter(b => b !== book);
+      }
+      await writeCatalog(catalog);
+      return res.status(200).json({ ok: true });
+    }
+
+    res.setHeader('Allow', 'GET, POST, DELETE');
+    return res.status(405).json({ error: 'method not allowed' });
+  } catch (e) {
+    return res.status(500).json({ error: String((e && e.message) || e) });
+  }
+}
