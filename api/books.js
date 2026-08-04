@@ -9,6 +9,13 @@ import { put, del, list } from '@vercel/blob';
 
 const CATALOG_PATH = 'ebookme/catalog.json';
 
+/* หา token ของ Blob store: ปกติชื่อ BLOB_READ_WRITE_TOKEN แต่ถ้าตอนเชื่อม store
+   ตั้ง prefix อื่นไว้ (เช่น UPLOAD_KEY_READ_WRITE_TOKEN) ก็ให้เจอด้วย */
+const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN
+  || Object.entries(process.env).find(
+    ([k, v]) => k.endsWith('_READ_WRITE_TOKEN') && String(v).startsWith('vercel_blob_rw_')
+  )?.[1];
+
 function isAuthed(req) {
   const secret = process.env.UPLOAD_KEY || '';
   const h = String(req.headers['authorization'] || '');
@@ -19,7 +26,7 @@ function isAuthed(req) {
 }
 
 async function readCatalog() {
-  const { blobs } = await list({ prefix: CATALOG_PATH, limit: 1 });
+  const { blobs } = await list({ prefix: CATALOG_PATH, limit: 1, token: BLOB_TOKEN });
   if (!blobs.length) return { books: [] };
   // ใส่ query กัน CDN cache เพื่อให้ได้สารบัญเวอร์ชันล่าสุดเสมอ
   const res = await fetch(`${blobs[0].url}?v=${Date.now()}`, { cache: 'no-store' });
@@ -33,11 +40,17 @@ async function writeCatalog(catalog) {
     contentType: 'application/json; charset=utf-8',
     addRandomSuffix: false,
     allowOverwrite: true,
+    token: BLOB_TOKEN,
   });
 }
 
 export default async function handler(req, res) {
   try {
+    if (!BLOB_TOKEN) {
+      return res.status(500).json({
+        error: 'ยังไม่ได้เชื่อม Blob store กับโปรเจกต์ — ไปที่ Vercel → Storage → เลือก store → Connect Project (prefix: BLOB) แล้ว Redeploy',
+      });
+    }
     if (req.method === 'GET') {
       const catalog = await readCatalog();
       res.setHeader('Cache-Control', 'no-store');
@@ -70,6 +83,7 @@ export default async function handler(req, res) {
         addRandomSuffix: false,
         allowOverwrite: true,
         cacheControlMaxAge: 60,
+        token: BLOB_TOKEN,
       });
 
       const catalog = await readCatalog();
@@ -110,11 +124,11 @@ export default async function handler(req, res) {
       if (file) {
         const c = book.chapters.find(c => c.file === file);
         if (!c) return res.status(404).json({ error: 'ไม่พบบทนี้' });
-        await del(c.url).catch(() => {});
+        await del(c.url, { token: BLOB_TOKEN }).catch(() => {});
         book.chapters = book.chapters.filter(x => x !== c);
         if (!book.chapters.length) catalog.books = catalog.books.filter(b => b !== book);
       } else {
-        await Promise.all(book.chapters.map(c => del(c.url).catch(() => {})));
+        await Promise.all(book.chapters.map(c => del(c.url, { token: BLOB_TOKEN }).catch(() => {})));
         catalog.books = catalog.books.filter(b => b !== book);
       }
       await writeCatalog(catalog);
