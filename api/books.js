@@ -120,7 +120,10 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      const { bookId, file } = req.query || {};
+      // req.query อาจไม่ถูก populate ในบาง runtime — parse จาก URL เองเป็น fallback
+      const qs = new URL(req.url || '', 'http://internal').searchParams;
+      const bookId = (req.query && req.query.bookId) || qs.get('bookId');
+      const file = (req.query && req.query.file) || qs.get('file');
       const catalog = await readCatalog();
       const book = catalog.books.find(b => b.id === bookId);
       if (!book) return res.status(404).json({ error: 'ไม่พบหนังสือ' });

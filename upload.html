@@ -116,10 +116,19 @@
     <h2>📄 บทที่จะอัปโหลด</h2>
     <label for="file">เลือกไฟล์ .md / .html จากเครื่อง (หรือวางเนื้อหาในช่องล่างเองก็ได้)</label>
     <input type="file" id="file" accept=".md,.markdown,.html">
-    <label for="chTitle">ชื่อบท</label>
-    <input type="text" id="chTitle" placeholder="บทที่ 1 ลิมิตและความต่อเนื่อง">
-    <label for="filename">ชื่อไฟล์ (ตั้งให้อัตโนมัติ แก้ได้)</label>
-    <input type="text" id="filename" placeholder="01-chapter.md">
+    <label for="splitMode">การแบ่งบท (เฉพาะ markdown)</label>
+    <select id="splitMode">
+      <option value="single">ไม่แบ่ง — อัปโหลดเป็นบทเดียว</option>
+      <option value="h1">แบ่งเป็นหลายบทตามหัวข้อ # (h1)</option>
+      <option value="h2">แบ่งเป็นหลายบทตามหัวข้อ ## (h2)</option>
+    </select>
+    <div id="splitPreview"></div>
+    <div id="singleFields">
+      <label for="chTitle">ชื่อบท</label>
+      <input type="text" id="chTitle" placeholder="บทที่ 1 ลิมิตและความต่อเนื่อง">
+      <label for="filename">ชื่อไฟล์ (ตั้งให้อัตโนมัติ แก้ได้)</label>
+      <input type="text" id="filename" placeholder="01-chapter.md">
+    </div>
     <label for="content">เนื้อหา (markdown หรือ HTML)</label>
     <textarea id="content" placeholder="# บทที่ 1 …&#10;&#10;วางเนื้อหาที่ได้จาก AI ตรงนี้ได้เลย"></textarea>
   </div>
@@ -157,11 +166,64 @@ function suggestFilename() {
   $('filename').value = String(n).padStart(2, '0') + '-' + slug + '.md';
 }
 
+/* --- แบ่ง markdown ไฟล์เดียวเป็นหลายบทตามหัวข้อ (ข้ามหัวข้อปลอมใน code fence) --- */
+function splitMarkdown(text, level) {
+  const re = level === 1 ? /^#\s+(.+)$/ : /^##\s+(.+)$/;
+  const parts = [];
+  let cur = { title: null, lines: [] };
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (/^(```|~~~)/.test(line.trim())) inFence = !inFence;
+    const m = inFence ? null : line.match(re);
+    if (m) {
+      parts.push(cur);
+      // ยกหัวข้อที่ใช้แบ่งขึ้นเป็น h1 ของบทใหม่เสมอ
+      cur = { title: m[1].trim(), lines: [line.replace(/^##\s/, '# ')] };
+    } else {
+      cur.lines.push(line);
+    }
+  }
+  parts.push(cur);
+  return parts
+    .map(p => {
+      let title = p.title;
+      if (!title) {
+        const h1 = p.lines.map(l => l.match(/^#\s+(.+)$/)).find(Boolean);
+        title = h1 ? h1[1].trim() : 'บทนำ';
+      }
+      return { title, content: p.lines.join('\n').trim() };
+    })
+    .filter(p => p.content);
+}
+
+function currentParts() {
+  const mode = $('splitMode').value;
+  if (mode === 'single') return null;
+  const parts = splitMarkdown($('content').value, mode === 'h1' ? 1 : 2);
+  return parts.length ? parts : null;
+}
+
+function updateSplitUI() {
+  const parts = currentParts();
+  $('singleFields').style.display = parts ? 'none' : '';
+  const pv = $('splitPreview');
+  if (!parts) {
+    pv.innerHTML = '';
+    $('submitBtn').textContent = '⬆️ อัปโหลด';
+    return;
+  }
+  const base = selectedBook() ? selectedBook().chapters.length : 0;
+  pv.innerHTML = `<label>จะแบ่งเป็น ${parts.length} บท:</label>` + parts.map((p, i) =>
+    `<div class="chapter-row"><span class="file">${String(base + i + 1).padStart(2, '0')}</span><span>${esc(p.title)}</span></div>`
+  ).join('');
+  $('submitBtn').textContent = `⬆️ อัปโหลด (${parts.length} บท)`;
+}
+
 function renderBookUI() {
   const book = selectedBook();
   $('newBookFields').style.display = book ? 'none' : '';
   const list = $('chapterList');
-  if (!book) { list.innerHTML = ''; suggestFilename(); return; }
+  if (!book) { list.innerHTML = ''; suggestFilename(); updateSplitUI(); return; }
 
   list.innerHTML =
     '<label>บทที่มีอยู่ (✕ = ลบบทนั้น)</label>' +
@@ -178,6 +240,7 @@ function renderBookUI() {
   });
   list.querySelector('#delBook').onclick = () => removeBook(book.id);
   suggestFilename();
+  updateSplitUI();
 }
 
 async function refreshBooks() {
@@ -202,6 +265,8 @@ async function refreshBooks() {
 $('bookSelect').onchange = renderBookUI;
 $('chTitle').addEventListener('input', suggestFilename);
 $('filename').addEventListener('input', () => { filenameDirty = true; });
+$('splitMode').addEventListener('change', updateSplitUI);
+$('content').addEventListener('input', updateSplitUI);
 
 $('file').addEventListener('change', async () => {
   const f = $('file').files[0];
@@ -213,12 +278,18 @@ $('file').addEventListener('change', async () => {
     const m = $('content').value.match(/^#\s+(.+)$/m) || $('content').value.match(/<h1[^>]*>(.*?)<\/h1>/i);
     if (m) $('chTitle').value = m[1].replace(/<[^>]+>/g, '').trim();
   }
+  // ถ้าไฟล์ markdown มีหัวข้อ # หลายอัน เดาให้เลยว่าน่าจะอยากแบ่งเป็นหลายบท
+  if (/\.(md|markdown)$/i.test(f.name) && splitMarkdown($('content').value, 1).length >= 2) {
+    $('splitMode').value = 'h1';
+  }
+  updateSplitUI();
 });
 
 function showStatus(ok, html) {
   const s = $('status');
   s.className = 'status show ' + (ok ? 'ok' : 'err');
   s.innerHTML = html;
+  s.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 async function api(method, payloadOrQuery) {
@@ -238,35 +309,61 @@ async function api(method, payloadOrQuery) {
 
 $('submitBtn').addEventListener('click', async () => {
   const book = selectedBook();
-  const payload = {
+  const bookMeta = {
     bookId: book ? book.id : $('bookId').value.trim().toLowerCase(),
     bookTitle: book ? undefined : $('bookTitle').value.trim(),
     bookCover: book ? undefined : $('bookCover').value.trim(),
     bookDescription: book ? undefined : $('bookDesc').value.trim(),
-    chapterTitle: $('chTitle').value.trim(),
-    filename: $('filename').value.trim(),
-    content: $('content').value,
   };
-  if (!payload.bookId) return showStatus(false, '❌ กรอก id ของหนังสือก่อน');
-  if (!payload.chapterTitle) return showStatus(false, '❌ กรอกชื่อบทก่อน');
-  if (!payload.content.trim()) return showStatus(false, '❌ ยังไม่มีเนื้อหา');
+  const content = $('content').value;
+  if (!bookMeta.bookId) return showStatus(false, '❌ กรอก id ของหนังสือก่อน');
+  if (!content.trim()) return showStatus(false, '❌ ยังไม่มีเนื้อหา');
   if (!$('key').value.trim()) return showStatus(false, '❌ ใส่ key ก่อน');
 
+  const parts = currentParts();
+  if (!parts && !$('chTitle').value.trim()) return showStatus(false, '❌ กรอกชื่อบทก่อน');
+
   $('submitBtn').disabled = true;
-  showStatus(true, '⏳ กำลังอัปโหลด…');
   try {
-    const r = await api('POST', payload);
+    let firstCh = 1, doneBook = bookMeta.bookId;
+    if (!parts) {
+      showStatus(true, '⏳ กำลังอัปโหลด…');
+      const r = await api('POST', {
+        ...bookMeta,
+        chapterTitle: $('chTitle').value.trim(),
+        filename: $('filename').value.trim(),
+        content,
+      });
+      firstCh = r.ch;
+      doneBook = r.book;
+    } else {
+      const base = book ? book.chapters.length : 0;
+      for (let i = 0; i < parts.length; i++) {
+        showStatus(true, `⏳ อัปโหลดบทที่ ${i + 1}/${parts.length} — ${esc(parts[i].title)}`);
+        const r = await api('POST', {
+          ...bookMeta,
+          chapterTitle: parts[i].title,
+          filename: `${String(base + i + 1).padStart(2, '0')}-${slugify(parts[i].title) || 'part'}.md`,
+          content: parts[i].content,
+        });
+        if (i === 0) firstCh = r.ch;
+        doneBook = r.book;
+      }
+    }
     localStorage.setItem('ebook:apikey', $('key').value.trim());
-    showStatus(true, `✅ อัปโหลดเรียบร้อย — <a href="reader.html?book=${encodeURIComponent(r.book)}&ch=${r.ch}">เปิดอ่านบทนี้ ›</a>`);
+    const label = parts ? `ครบ ${parts.length} บท` : 'เรียบร้อย';
+    showStatus(true, `✅ อัปโหลด${label} — <a href="reader.html?book=${encodeURIComponent(doneBook)}&ch=${firstCh}">เปิดอ่าน ›</a>`);
     $('content').value = '';
     $('chTitle').value = '';
     $('file').value = '';
+    $('splitMode').value = 'single';
     filenameDirty = false;
     await refreshBooks();
-    $('bookSelect').value = r.book;
+    $('bookSelect').value = doneBook;
     renderBookUI();
   } catch (e) {
-    showStatus(false, '❌ ' + esc(e.message));
+    const extra = currentParts() ? ' — บทที่อัปโหลดผ่านไปแล้วยังอยู่ ดูรายการบทของหนังสือแล้วค่อยอัปโหลดส่วนที่ขาด' : '';
+    showStatus(false, '❌ ' + esc(e.message) + extra);
   } finally {
     $('submitBtn').disabled = false;
   }
