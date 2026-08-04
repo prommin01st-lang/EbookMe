@@ -126,7 +126,7 @@
     <div id="singleFields">
       <label for="chTitle">ชื่อบท</label>
       <input type="text" id="chTitle" placeholder="บทที่ 1 ลิมิตและความต่อเนื่อง">
-      <label for="filename">ชื่อไฟล์ (ตั้งให้อัตโนมัติ แก้ได้)</label>
+      <label for="filename">ชื่อไฟล์ (ตั้งให้อัตโนมัติ แก้ได้ — ตั้งซ้ำกับบทเดิม = เขียนทับบทนั้น)</label>
       <input type="text" id="filename" placeholder="01-chapter.md">
     </div>
     <label for="content">เนื้อหา (markdown หรือ HTML)</label>
@@ -156,6 +156,17 @@ function selectedBook() {
 
 function slugify(t) {
   return String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+
+/* แปลงชื่อไฟล์จากเครื่องให้ปลอดภัย + ใส่เลขลำดับนำหน้า จะได้ไม่ชนกับบทเดิมโดยบังเอิญ */
+function safeFilename(name, n) {
+  const extMatch = name.match(/\.(md|markdown|html)$/i);
+  const ext = extMatch ? extMatch[0].toLowerCase().replace('markdown', 'md') : '.md';
+  let base = name.replace(/\.(md|markdown|html)$/i, '')
+    .replace(/[^\w.-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
+  if (!base) base = 'chapter';
+  const prefix = /^\d{2}[-_.]/.test(base) ? '' : String(n).padStart(2, '0') + '-';
+  return prefix + base + ext;
 }
 
 function suggestFilename() {
@@ -272,7 +283,8 @@ $('file').addEventListener('change', async () => {
   const f = $('file').files[0];
   if (!f) return;
   $('content').value = await f.text();
-  $('filename').value = f.name;
+  const book = selectedBook();
+  $('filename').value = safeFilename(f.name, (book ? book.chapters.length : 0) + 1);
   filenameDirty = true;
   if (!$('chTitle').value) {
     const m = $('content').value.match(/^#\s+(.+)$/m) || $('content').value.match(/<h1[^>]*>(.*?)<\/h1>/i);
@@ -322,6 +334,15 @@ $('submitBtn').addEventListener('click', async () => {
 
   const parts = currentParts();
   if (!parts && !$('chTitle').value.trim()) return showStatus(false, '❌ กรอกชื่อบทก่อน');
+
+  // กันเขียนทับบทเดิมโดยไม่ตั้งใจ (ชื่อไฟล์ซ้ำ = ระบบถือว่าเป็นการแก้ไขบทนั้น)
+  if (!parts && book) {
+    const fn = $('filename').value.trim();
+    const dupe = book.chapters.find(c => c.file === fn);
+    if (dupe && !confirm(`⚠️ มีบท "${dupe.title}" ใช้ชื่อไฟล์ ${fn} อยู่แล้ว\nอัปโหลดต่อ = เขียนทับเนื้อหาบทนั้น\n\nถ้าตั้งใจจะ "เพิ่มบทใหม่" ให้กด Cancel แล้วแก้ชื่อไฟล์ไม่ให้ซ้ำ`)) {
+      return showStatus(false, 'ยกเลิกการเขียนทับแล้ว — แก้ "ชื่อไฟล์" ให้ไม่ซ้ำ แล้วอัปโหลดใหม่จะกลายเป็นบทใหม่แทน');
+    }
+  }
 
   $('submitBtn').disabled = true;
   try {
