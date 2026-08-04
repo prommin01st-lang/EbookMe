@@ -173,10 +173,10 @@
 </header>
 
 <div class="steps">
-  <div class="step-dot">1 · Key</div>
-  <div class="step-dot">2 · หนังสือ</div>
-  <div class="step-dot">3 · เนื้อหา</div>
-  <div class="step-dot">4 · อัปโหลด</div>
+  <div class="step-dot" id="dotKey">1 · Key</div>
+  <div class="step-dot" id="dotBook">2 · หนังสือ</div>
+  <div class="step-dot" id="dotContent">3 · เนื้อหา</div>
+  <div class="step-dot" id="dotUpload">4 · อัปโหลด</div>
 </div>
 
 <main class="form-main">
@@ -216,6 +216,9 @@
       <input type="text" id="bookDesc" placeholder="หนึ่งประโยคว่าเล่มนี้เกี่ยวกับอะไร">
     </div>
     <div id="chapterList"></div>
+    <p class="hint" style="margin-top:0.8rem">
+      <button class="btn" id="changeKeyBtn" style="font-size:0.8rem;color:var(--text-dim)">🔑 เปลี่ยน key</button>
+    </p>
   </div>
 
   <!-- ขั้นที่ 3 -->
@@ -491,11 +494,34 @@ async function api(method, payloadOrQuery) {
   if (method === 'DELETE') url += '?' + new URLSearchParams(payloadOrQuery);
   const res = await fetch(url, opts);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  if (!res.ok) {
+    const err = new Error(data.error || ('HTTP ' + res.status));
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
 /* --- wizard --- */
+function keyKnown() { return !!localStorage.getItem('ebook:apikey'); }
+
+/* มี key จำไว้แล้ว = ซ่อนขั้น Key เหลือ wizard 3 ขั้น */
+function setupSteps() {
+  const hk = keyKnown();
+  $('dotKey').style.display = hk ? 'none' : '';
+  $('dotBook').textContent = (hk ? '1' : '2') + ' · หนังสือ';
+  $('dotContent').textContent = (hk ? '2' : '3') + ' · เนื้อหา';
+  $('dotUpload').textContent = (hk ? '3' : '4') + ' · อัปโหลด';
+}
+
+function showKeyStep() {
+  $('dotKey').style.display = '';
+  $('dotBook').textContent = '2 · หนังสือ';
+  $('dotContent').textContent = '3 · เนื้อหา';
+  $('dotUpload').textContent = '4 · อัปโหลด';
+  goStep(1);
+}
+
 function goStep(n) {
   step = n;
   document.querySelectorAll('.step-panel').forEach((p, i) => p.classList.toggle('active', i === n - 1));
@@ -503,7 +529,7 @@ function goStep(n) {
     d.classList.toggle('active', i === n - 1);
     d.classList.toggle('done', i < n - 1);
   });
-  $('backBtn').style.visibility = n === 1 ? 'hidden' : 'visible';
+  $('backBtn').style.visibility = (n === 1 || (n === 2 && keyKnown())) ? 'hidden' : 'visible';
   $('nextBtn').textContent = n === 4 ? '⬆️ อัปโหลด' : 'ถัดไป ›';
   if (n === 4) renderSummary();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -609,6 +635,7 @@ async function doUpload() {
       }
     }
     localStorage.setItem('ebook:apikey', $('key').value.trim());
+    setupSteps();
     const label = parts ? `ครบ ${parts.length} บท` : 'เรียบร้อย';
     showStatus(true,
       `✅ อัปโหลด${label} — <a href="reader.html?book=${encodeURIComponent(doneBook)}&ch=${firstCh}">เปิดอ่าน ›</a> ` +
@@ -625,6 +652,7 @@ async function doUpload() {
   } catch (e) {
     const extra = parts ? ' — บทที่อัปโหลดผ่านไปแล้วยังอยู่ ย้อนกลับไปดูรายการบทในขั้นที่ 2 แล้วอัปโหลดส่วนที่ขาด' : '';
     showStatus(false, '❌ ' + esc(e.message) + extra);
+    if (e.status === 401) { localStorage.removeItem('ebook:apikey'); showKeyStep(); }
   } finally {
     $('nextBtn').disabled = false;
     $('backBtn').disabled = false;
@@ -658,6 +686,7 @@ async function removeChapter(bookId, file) {
     await refreshBooks();
   } catch (e) {
     showStatus(false, '❌ ' + esc(e.message));
+    if (e.status === 401) { localStorage.removeItem('ebook:apikey'); showKeyStep(); }
   }
 }
 
@@ -674,12 +703,16 @@ async function removeBook(bookId) {
     await refreshBooks();
   } catch (e) {
     showStatus(false, '❌ ' + esc(e.message));
+    if (e.status === 401) { localStorage.removeItem('ebook:apikey'); showKeyStep(); }
   }
 }
 
-/* --- เริ่มต้น: ถ้าเครื่องจำ key ไว้แล้ว ข้ามขั้นที่ 1 ให้เลย --- */
+$('changeKeyBtn').addEventListener('click', showKeyStep);
+
+/* --- เริ่มต้น: ถ้าเครื่องจำ key ไว้แล้ว ซ่อนขั้น Key แล้วเริ่มที่เลือกหนังสือเลย --- */
+setupSteps();
 refreshBooks().then(() => {
-  goStep($('key').value.trim() ? 2 : 1);
+  goStep(keyKnown() ? 2 : 1);
 });
 </script>
 </body>
