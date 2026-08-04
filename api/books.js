@@ -7,7 +7,11 @@
 import crypto from 'node:crypto';
 import { put, del, list } from '@vercel/blob';
 
-const CATALOG_PATH = 'ebookme/catalog.json';
+/* สารบัญเก็บแบบ "เขียนไฟล์ใหม่ทุกครั้ง" (ebookme/catalog/<timestamp>.json)
+   เพราะการเขียนทับไฟล์เดิมบน Vercel Blob ใช้เวลา propagate ได้ถึง ~60 วิ
+   ทำให้อัปโหลดแล้วหนังสือไม่โผล่ทันที — ไฟล์ใหม่อ่านได้ทันทีเสมอ */
+const CATALOG_PREFIX = 'ebookme/catalog/';
+const LEGACY_CATALOG = 'ebookme/catalog.json';
 
 /* หา token ของ Blob store: ปกติชื่อ BLOB_READ_WRITE_TOKEN แต่รองรับ prefix อื่น
    (เช่น UPLOAD_KEY_READ_WRITE_TOKEN) ด้วย และล้างเครื่องหมายคำพูด/ช่องว่าง
@@ -30,22 +34,32 @@ function isAuthed(req) {
 }
 
 async function readCatalog() {
-  const { blobs } = await list({ prefix: CATALOG_PATH, limit: 1, token: BLOB_TOKEN });
-  if (!blobs.length) return { books: [] };
-  // ใส่ query กัน CDN cache เพื่อให้ได้สารบัญเวอร์ชันล่าสุดเสมอ
-  const res = await fetch(`${blobs[0].url}?v=${Date.now()}`, { cache: 'no-store' });
-  if (!res.ok) return { books: [] };
-  return await res.json();
+  const { blobs } = await list({ prefix: CATALOG_PREFIX, limit: 1000, token: BLOB_TOKEN });
+  if (blobs.length) {
+    const latest = blobs.reduce((a, b) => (a.pathname > b.pathname ? a : b));
+    const res = await fetch(latest.url, { cache: 'no-store' });
+    if (res.ok) return await res.json();
+  }
+  // fallback: สารบัญรุ่นเก่าแบบเขียนทับ (ก่อนย้ายมาระบบ versioned)
+  const legacy = await list({ prefix: LEGACY_CATALOG, limit: 1, token: BLOB_TOKEN });
+  if (legacy.blobs.length) {
+    const res = await fetch(`${legacy.blobs[0].url}?v=${Date.now()}`, { cache: 'no-store' });
+    if (res.ok) return await res.json();
+  }
+  return { books: [] };
 }
 
 async function writeCatalog(catalog) {
-  await put(CATALOG_PATH, JSON.stringify(catalog, null, 2), {
+  const { blobs } = await list({ prefix: CATALOG_PREFIX, limit: 1000, token: BLOB_TOKEN });
+  await put(`${CATALOG_PREFIX}${Date.now()}.json`, JSON.stringify(catalog, null, 2), {
     access: 'public',
     contentType: 'application/json; charset=utf-8',
     addRandomSuffix: false,
-    allowOverwrite: true,
     token: BLOB_TOKEN,
   });
+  // เก็บกวาดเวอร์ชันเก่า เหลือ 2 ชุดล่าสุดกันชนกับ read ที่กำลังเกิดพอดี
+  const olds = blobs.sort((a, b) => b.pathname.localeCompare(a.pathname)).slice(2);
+  await Promise.all(olds.map(b => del(b.url, { token: BLOB_TOKEN }).catch(() => {})));
 }
 
 export default async function handler(req, res) {
@@ -58,7 +72,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const catalog = await readCatalog();
       res.setHeader('Cache-Control', 'no-store');
-      return res.status(200).json(catalog);
+      return res.status(200).json({ api: 'v2', books: catalog.books || [] });
     }
 
     if (!isAuthed(req)) {
@@ -79,14 +93,13 @@ export default async function handler(req, res) {
       if (content.length > 2_000_000)
         return res.status(400).json({ error: 'เนื้อหาใหญ่เกิน 2MB' });
 
-      const blob = await put(`ebookme/books/${bookId}/${filename}`, content, {
+      // ชื่อไฟล์จริงมี timestamp นำหน้า = ไม่มีการเขียนทับ ทุกอัปโหลดอ่านได้ทันที
+      const blob = await put(`ebookme/books/${bookId}/${Date.now()}-${filename}`, content, {
         access: 'public',
         contentType: filename.toLowerCase().endsWith('.md')
           ? 'text/markdown; charset=utf-8'
           : 'text/html; charset=utf-8',
         addRandomSuffix: false,
-        allowOverwrite: true,
-        cacheControlMaxAge: 60,
         token: BLOB_TOKEN,
       });
 
@@ -105,6 +118,7 @@ export default async function handler(req, res) {
 
       const existing = book.chapters.find(c => c.file === filename);
       if (existing) {
+        if (existing.url && existing.url !== blob.url) await del(existing.url, { token: BLOB_TOKEN }).catch(() => {});
         existing.title = chapterTitle.trim();
         existing.url = blob.url;
         existing.updated = Date.now();
