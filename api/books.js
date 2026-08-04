@@ -9,12 +9,16 @@ import { put, del, list } from '@vercel/blob';
 
 const CATALOG_PATH = 'ebookme/catalog.json';
 
-/* หา token ของ Blob store: ปกติชื่อ BLOB_READ_WRITE_TOKEN แต่ถ้าตอนเชื่อม store
-   ตั้ง prefix อื่นไว้ (เช่น UPLOAD_KEY_READ_WRITE_TOKEN) ก็ให้เจอด้วย */
-const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN
-  || Object.entries(process.env).find(
-    ([k, v]) => k.endsWith('_READ_WRITE_TOKEN') && String(v).startsWith('vercel_blob_rw_')
-  )?.[1];
+/* หา token ของ Blob store: ปกติชื่อ BLOB_READ_WRITE_TOKEN แต่รองรับ prefix อื่น
+   (เช่น UPLOAD_KEY_READ_WRITE_TOKEN) ด้วย และล้างเครื่องหมายคำพูด/ช่องว่าง
+   ที่มักติดมาตอนคัดลอกจากหน้า .env ของ Vercel */
+const cleanToken = v => String(v || '').trim().replace(/^["']+|["']+$/g, '');
+const BLOB_TOKEN = [
+  process.env.BLOB_READ_WRITE_TOKEN,
+  ...Object.entries(process.env)
+    .filter(([k]) => k.endsWith('_READ_WRITE_TOKEN'))
+    .map(([, v]) => v),
+].map(cleanToken).find(v => v.startsWith('vercel_blob_rw_'));
 
 function isAuthed(req) {
   const secret = process.env.UPLOAD_KEY || '';
