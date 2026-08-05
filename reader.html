@@ -466,7 +466,13 @@ function layoutPages(ratio) {
 let flip = null;
 function destroyFlip() {
   if (flip) { try { flip.destroy(); } catch {} flip = null; }
-  const holder = $('flipBook');
+  // flip.destroy() ของ StPageFlip ถอด container ออกจาก DOM ไปด้วย — ถ้าหายให้สร้างคืน
+  let holder = $('flipBook');
+  if (!holder) {
+    holder = document.createElement('div');
+    holder.id = 'flipBook';
+    document.querySelector('.reader-main').appendChild(holder);
+  }
   holder.innerHTML = '';
   holder.removeAttribute('style');
 }

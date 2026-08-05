@@ -5,7 +5,7 @@
    - เนื้อหาบทบน Blob (cross-origin): cache-first
      ไฟล์พวกนี้ immutable (ชื่อมี timestamp, แก้บท = ไฟล์ใหม่ + ?v= ใหม่) โหลดซ้ำเปลืองเปล่า ๆ */
 
-const VERSION = 'ebookme-v1';
+const VERSION = 'ebookme-v2';
 
 const CORE = [
   'index.html', 'reader.html', 'upload.html', 'books.html',
@@ -34,6 +34,7 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return; // อัปโหลด/ลบ/แก้ไข ไปตรง network เสมอ
 
   const url = new URL(req.url);
+  if (!/^https?:$/.test(url.protocol)) return; // chrome-extension:// ฯลฯ — cache ไม่ได้ อย่ายุ่ง
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
 
