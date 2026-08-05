@@ -608,3 +608,29 @@ mark.search-hit {
 }
 .font-pop button:hover { background: var(--accent-soft); }
 .font-pop button.current { color: var(--accent); font-weight: 700; }
+
+/* ---------- อนิเมชันพลิกหน้ากระดาษ ---------- */
+
+.reader-main { perspective: 1400px; }
+.content { will-change: transform, opacity; }
+
+/* ไปบทถัดไป: หน้าปัจจุบันพลิกจากขอบขวาหมุนรอบสัน (ซ้าย) ออกไป แล้วหน้าใหม่วางตัวเข้าที่ */
+@keyframes page-flip-away { from { transform: rotateY(0); opacity: 1; } to { transform: rotateY(-85deg); opacity: 0.35; } }
+@keyframes page-settle-in { from { transform: rotateY(12deg); opacity: 0; } to { transform: rotateY(0); opacity: 1; } }
+/* ย้อนบทก่อนหน้า: หน้าเดิมจางออก แล้วหน้าก่อนพลิกกลับเข้ามาปิดทับ */
+@keyframes page-settle-out { from { transform: rotateY(0); opacity: 1; } to { transform: rotateY(12deg); opacity: 0; } }
+@keyframes page-flip-back { from { transform: rotateY(-85deg); opacity: 0.35; } to { transform: rotateY(0); opacity: 1; } }
+
+.content.turn-out-next { animation: page-flip-away 0.22s ease-in both; transform-origin: left center; }
+.content.turn-in-next  { animation: page-settle-in 0.26s ease-out both; transform-origin: left center; }
+.content.turn-out-prev { animation: page-settle-out 0.18s ease-in both; transform-origin: left center; }
+.content.turn-in-prev  { animation: page-flip-back 0.28s ease-out both; transform-origin: left center; }
+
+.drawer-foot {
+  border-top: 1px solid var(--border);
+  padding: 0.7rem 1rem calc(0.7rem + env(safe-area-inset-bottom));
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+.drawer-foot label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+.drawer-foot input { accent-color: var(--accent); }

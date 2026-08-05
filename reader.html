@@ -63,6 +63,9 @@
     <button class="btn" id="drawerClose">✕</button>
   </header>
   <ol id="tocList"></ol>
+  <div class="drawer-foot">
+    <label><input type="checkbox" id="animToggle"> 📖 อนิเมชันพลิกหน้า (ปัดซ้าย/ขวาเพื่อเปลี่ยนบท)</label>
+  </div>
 </aside>
 
 <script src="assets/marked.min.js"></script>
@@ -402,14 +405,87 @@ function renderNav() {
   $('posBtn').textContent = `บทที่ ${ch}/${total}`;
   $('prevBtn').disabled = ch <= 1;
   $('nextBtn').disabled = ch >= total;
-  $('prevBtn').onclick = () => { if (ch > 1) location.href = chapterUrl(ch - 1); };
-  $('nextBtn').onclick = () => { if (ch < total) location.href = chapterUrl(ch + 1); };
+  $('prevBtn').onclick = () => navTo(ch - 1);
+  $('nextBtn').onclick = () => navTo(ch + 1);
 }
 
 addEventListener('keydown', e => {
   if (e.target.closest('input, textarea')) return;
-  if (e.key === 'ArrowLeft' && ch > 1) location.href = chapterUrl(ch - 1);
-  if (e.key === 'ArrowRight' && book && ch < book.chapters.length) location.href = chapterUrl(ch + 1);
+  if (e.key === 'ArrowLeft') navTo(ch - 1);
+  if (e.key === 'ArrowRight') navTo(ch + 1);
+});
+
+/* ---------- เปลี่ยนบทแบบไม่ reload หน้า + อนิเมชันพลิกหน้ากระดาษ ---------- */
+
+const pageAnimOn = () => localStorage.getItem('ebook:pageAnim') !== '0';
+
+function animateClass(el, cls) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; el.classList.remove(cls); resolve(); };
+    el.addEventListener('animationend', finish, { once: true });
+    setTimeout(finish, 450); // กันค้างถ้า animationend ไม่ยิง
+    el.classList.add(cls);
+  });
+}
+
+let navBusy = false;
+async function navTo(n, { push = true } = {}) {
+  if (navBusy || !book || !(n >= 1 && n <= book.chapters.length) || n === ch) return;
+  navBusy = true;
+  const dir = n > ch ? 1 : -1;
+  if (ready) localStorage.setItem(keyPos(), scrollRatio().toFixed(4)); // จำตำแหน่งบทเดิมก่อนออก
+  ready = false;
+  toggleDrawer(false);
+
+  const anim = pageAnimOn() && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const content = $('content');
+  if (anim) await animateClass(content, dir > 0 ? 'turn-out-next' : 'turn-out-prev');
+  if (push) history.pushState(null, '', chapterUrl(n));
+  await renderChapter(n);
+  if (anim) await animateClass(content, dir > 0 ? 'turn-in-next' : 'turn-in-prev');
+  navBusy = false;
+}
+
+// ปุ่ม back/forward ของเบราว์เซอร์
+addEventListener('popstate', () => {
+  const n = parseInt(new URLSearchParams(location.search).get('ch'), 10) || 1;
+  navTo(n, { push: false });
+});
+
+// ลิงก์ทุกอันที่ชี้บทในเล่มเดียวกัน (สารบัญ drawer + ลิงก์ข้ามบทในเนื้อหา) → เปลี่ยนบทในหน้าเลย
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[href]');
+  if (!a) return;
+  const m = a.getAttribute('href').match(/^reader\.html\?book=([^&]+)&ch=(\d+)$/);
+  if (!m || decodeURIComponent(m[1]) !== bookId) return;
+  e.preventDefault();
+  navTo(parseInt(m[2], 10));
+});
+
+// ปัดซ้าย/ขวาเพื่อพลิกบท (มือถือ/แท็บเล็ต) — ไม่ชนกับการเลื่อนอ่านแนวตั้ง
+// และไม่ทำงานถ้าปัดในตาราง/แผนภาพ/โค้ดที่เลื่อนแนวนอนได้เอง
+let swipeStart = null;
+addEventListener('touchstart', e => {
+  swipeStart = (e.touches.length === 1 &&
+    !document.body.classList.contains('drawer-open') &&
+    !e.target.closest('.table-wrap, .mermaid-box, pre'))
+    ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
+    : null;
+}, { passive: true });
+addEventListener('touchend', e => {
+  if (!swipeStart) return;
+  const dx = e.changedTouches[0].clientX - swipeStart.x;
+  const dy = e.changedTouches[0].clientY - swipeStart.y;
+  const dt = Date.now() - swipeStart.t;
+  swipeStart = null;
+  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || dt > 600) return;
+  navTo(dx < 0 ? ch + 1 : ch - 1); // ปัดซ้าย = บทถัดไป (เหมือนพลิกหนังสือ)
+}, { passive: true });
+
+$('animToggle').checked = pageAnimOn();
+$('animToggle').addEventListener('change', () => {
+  localStorage.setItem('ebook:pageAnim', $('animToggle').checked ? '1' : '0');
 });
 
 async function load() {
@@ -429,8 +505,14 @@ async function load() {
     return;
   }
 
-  ch = parseInt(params.get('ch'), 10);
-  if (!(ch >= 1 && ch <= book.chapters.length)) ch = 1;
+  let n = parseInt(params.get('ch'), 10);
+  if (!(n >= 1 && n <= book.chapters.length)) n = 1;
+  await renderChapter(n, params.get('q'));
+}
+
+async function renderChapter(n, q) {
+  const content = $('content');
+  ch = n;
   localStorage.setItem('ebook:last:' + bookId, ch);
 
   const chapter = book.chapters[ch - 1];
@@ -507,7 +589,7 @@ async function load() {
   renderMermaid(content);
 
   // ถ้ามาจากหน้าค้นหา (?q=) ไฮไลต์คำแล้วเลื่อนไปจุดแรกที่เจอ ไม่งั้นคืนตำแหน่งอ่านล่าสุด
-  const firstHit = highlightQuery(content, params.get('q'));
+  const firstHit = highlightQuery(content, q);
   const saved = parseFloat(localStorage.getItem(keyPos()));
   requestAnimationFrame(() => {
     if (firstHit) {
@@ -515,6 +597,8 @@ async function load() {
     } else if (saved > 0.01 && saved < 0.99) {
       const el = document.scrollingElement;
       el.scrollTop = saved * (el.scrollHeight - el.clientHeight);
+    } else {
+      document.scrollingElement.scrollTop = 0; // บทใหม่เริ่มบนสุด (สำคัญตอนสลับบทแบบไม่ reload)
     }
     ready = true;
     onScroll();
