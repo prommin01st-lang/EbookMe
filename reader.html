@@ -149,6 +149,16 @@ function chapterUrl(n) {
   return `reader.html?book=${encodeURIComponent(bookId)}&ch=${n}`;
 }
 
+/* ไฟล์จาก AI มักพก CSS ของตัวเองมาด้วย (<style>, style=, <font>, bgcolor)
+   ซึ่งจะทับสีของธีมเรา — ล้างออกให้หมด เนื้อหาต้องใช้สไตล์ของ reader เท่านั้น */
+function stripForeignStyles(root) {
+  root.querySelectorAll('style, link, script, meta, title, base').forEach(el => el.remove());
+  root.querySelectorAll('font').forEach(f => f.replaceWith(...f.childNodes));
+  root.querySelectorAll('[style], [bgcolor], [color], [background]').forEach(el => {
+    ['style', 'bgcolor', 'color', 'background'].forEach(a => el.removeAttribute(a));
+  });
+}
+
 // แปลง GitHub-style callout (> [!NOTE] ฯลฯ) เป็นกล่อง note/tip/warning
 function convertCallouts(root) {
   const map = { NOTE: 'note', TIP: 'tip', WARNING: 'warning', IMPORTANT: 'note', CAUTION: 'warning' };
@@ -236,6 +246,7 @@ async function load() {
     const doc = new DOMParser().parseFromString(raw, 'text/html');
     content.innerHTML = doc.body.innerHTML;
   }
+  stripForeignStyles(content);
 
   // ตารางกว้าง ๆ ให้เลื่อนแนวนอนได้ในกรอบตัวเอง
   content.querySelectorAll('table').forEach(t => {
