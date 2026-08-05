@@ -11,6 +11,9 @@
     document.documentElement.dataset.theme = t;
   })();
 </script>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2563eb">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="assets/app.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
 </head>
@@ -18,9 +21,16 @@
 
 <header class="topbar">
   <span class="title" style="font-size:1.1rem">📚 EbookMe</span>
+  <button class="btn" id="searchBtn" title="ค้นหาในหนังสือทุกเล่ม">🔍</button>
   <a class="btn" href="upload.html" title="อัปโหลดหนังสือขึ้นคลาวด์">＋</a>
   <button class="btn" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
 </header>
+
+<div class="search-panel" id="searchPanel">
+  <input type="search" id="searchInput" placeholder="ค้นหาในหนังสือทุกเล่ม… (อย่างน้อย 2 ตัวอักษร)">
+  <div class="search-status" id="searchStatus"></div>
+  <ul class="search-results" id="searchResults"></ul>
+</div>
 
 <main class="shelf" id="shelf">
   <div class="empty-state">กำลังโหลด…</div>
@@ -96,6 +106,88 @@ async function loadShelf() {
 }
 
 loadShelf();
+
+/* ---------- ค้นหาข้อความข้ามเล่ม (client-side ทั้งหมด) ---------- */
+
+const searchPanel = document.getElementById('searchPanel');
+const searchInput = document.getElementById('searchInput');
+const searchStatus = document.getElementById('searchStatus');
+const searchResults = document.getElementById('searchResults');
+let chapterTexts = null; // โหลดเนื้อหาทุกบทครั้งเดียวตอนค้นครั้งแรก แล้ว cache ไว้
+
+document.getElementById('searchBtn').addEventListener('click', () => {
+  searchPanel.classList.toggle('open');
+  if (searchPanel.classList.contains('open')) searchInput.focus();
+});
+
+async function loadAllTexts() {
+  if (chapterTexts) return chapterTexts;
+  const books = await loadCatalog();
+  const jobs = [];
+  books.forEach(b => (b.chapters || []).forEach((c, i) => jobs.push(
+    fetch(c.path, { cache: 'no-store' })
+      .then(r => r.ok ? r.text() : '')
+      .then(raw => ({
+        bookId: b.id, bookTitle: b.title, ch: i + 1, chTitle: c.title,
+        text: /\.md([?#].*)?$/i.test(c.path)
+          ? raw
+          : (new DOMParser().parseFromString(raw, 'text/html').body.textContent || ''),
+      }))
+      .catch(() => null)
+  )));
+  searchStatus.textContent = `กำลังโหลดเนื้อหา ${jobs.length} บท…`;
+  chapterTexts = (await Promise.all(jobs)).filter(Boolean);
+  return chapterTexts;
+}
+
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+async function runSearch() {
+  const q = searchInput.value.trim();
+  if (q.length < 2) {
+    searchResults.innerHTML = '';
+    searchStatus.textContent = '';
+    return;
+  }
+  const texts = await loadAllTexts();
+  if (searchInput.value.trim() !== q) return; // พิมพ์ต่อระหว่างโหลด — รอบใหม่จัดการเอง
+
+  const needle = q.toLowerCase();
+  const found = [];
+  for (const t of texts) {
+    const lower = t.text.toLowerCase();
+    const at = lower.indexOf(needle);
+    if (at === -1) continue;
+    const count = lower.split(needle).length - 1;
+    const snip = t.text.slice(Math.max(0, at - 50), at + q.length + 70).replace(/\s+/g, ' ').trim();
+    found.push({ ...t, count, snip });
+  }
+  found.sort((a, b) => b.count - a.count);
+
+  searchStatus.textContent = found.length
+    ? `เจอใน ${found.length} บท`
+    : `ไม่พบ "${q}" ในหนังสือเล่มไหนเลย`;
+  const markRe = new RegExp(`(${escRe(q)})`, 'ig');
+  searchResults.innerHTML = found.map(r => {
+    const snipHtml = r.snip.split(markRe)
+      .map((p, i) => i % 2 ? `<mark class="search-hit">${esc(p)}</mark>` : esc(p)).join('');
+    return `
+      <li><a href="reader.html?book=${encodeURIComponent(r.bookId)}&ch=${r.ch}&q=${encodeURIComponent(q)}">
+        <div class="where">${esc(r.bookTitle)} › บทที่ ${r.ch} ${esc(r.chTitle)} · ${r.count} จุด</div>
+        <div class="snippet">…${snipHtml}…</div>
+      </a></li>`;
+  }).join('');
+}
+
+let searchTimer = null;
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 300);
+});
+searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(); } });
+</script>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>
