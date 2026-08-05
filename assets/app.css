@@ -885,16 +885,20 @@ body.paged {
 }
 
 body.paged .reader-main {
+  position: relative;
+  max-width: 82rem;   /* แท็บเล็ตเต็มจอ, จอกว้างมากคุมไม่ให้บรรทัดยาวจนอ่านยาก */
   height: calc(100dvh - var(--header-h) - 3.6rem - env(safe-area-inset-bottom));
-  padding-top: 1rem;
-  padding-bottom: 0.4rem;
+  padding: 0.9rem max(1rem, env(safe-area-inset-right)) 0.5rem max(1rem, env(safe-area-inset-left));
   overflow: hidden;
+  perspective: 2200px;
+  touch-action: pan-y;
 }
 
 body.paged .content {
   height: 100%;
   column-fill: auto;
-  transition: transform 0.3s ease-out;
+  transition: none;   /* หน้ากระดาษที่พลิกคือ .flip-leaf — ตัวนี้สลับหน้าใต้ใบทันที */
+  backface-visibility: hidden;
 }
 
 body.paged .content .table-wrap,
@@ -997,17 +1001,32 @@ body.paged .content img { break-inside: avoid; }
   .btn .btn-label { display: none; }
 }
 
-/* ---------- สมุดพลิกหน้า StPageFlip ---------- */
+/* ---------- ใบกระดาษที่พลิก ---------- */
 
-#flipBook { display: none; }
-body.paged .reader-main { position: relative; }
-/* ต้นฉบับใช้วัด/แบ่งหน้าเท่านั้น (child ตรงของ reader-main) — clone ใน flipBook คือตัวที่โชว์ */
-body.paged .reader-main > .content { visibility: hidden; }
-body.paged #flipBook { display: block; position: absolute; z-index: 1; }
-.flip-page {
+.flip-leaf {
+  position: absolute;
+  display: none;
+  z-index: 2;
   overflow: hidden;
-  background: var(--bg); /* หน้ากระดาษต้องทึบ ไม่ให้หน้าข้างใต้ทะลุตอนพลิก */
+  background: var(--bg);
+  transform-origin: left center;
+  backface-visibility: hidden;
+  will-change: transform;
+  box-shadow: 0 0 22px rgba(0, 0, 0, 0.28);
+  border-right: 1px solid var(--border);
 }
-.flip-page .flip-inner { visibility: visible; }
-#flipBook.page-fade-out { animation: page-fade 0.14s ease-in both; }
-#flipBook.page-fade-in  { animation: page-fade 0.18s ease-out both reverse; }
+
+.flip-leaf-inner { position: absolute; inset: 0; }
+
+/* เงาไล่ระดับจากสันหนังสือ ทำให้ตอนพลิกดูมีมิติเหมือนกระดาษจริง */
+.flip-leaf-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(to right,
+    rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.12) 22%, rgba(0, 0, 0, 0) 60%);
+}
+
+.content.page-fade-out { animation: page-fade 0.14s ease-in both; }
+.content.page-fade-in  { animation: page-fade 0.18s ease-out both reverse; }

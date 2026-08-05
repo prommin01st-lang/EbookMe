@@ -49,8 +49,6 @@
   <article class="content" id="content">
     <div class="loading">กำลังโหลดเนื้อหา…</div>
   </article>
-  <!-- โหมดพลิกหน้า: #content เป็นต้นฉบับ (ซ่อนไว้ใช้วัด/แบ่งหน้า) ตัวที่เห็นคือสมุด StPageFlip -->
-  <div id="flipBook"></div>
 </main>
 
 <nav class="bottombar">
@@ -73,7 +71,6 @@
 </aside>
 
 <script src="assets/marked.min.js"></script>
-<script src="assets/page-flip.browser.js"></script>
 <script src="assets/catalog.js"></script>
 <script>
 const THEMES = ['light', 'sepia', 'dark'];
@@ -437,7 +434,7 @@ addEventListener('keydown', e => {
 
 const PAGE_GAP = 48;
 let mode = localStorage.getItem('ebook:readMode') || 'page';
-let page = 0, pages = 1, pageW = 0;
+let page = 0, pages = 1, pageW = 0, pageH = 0, colW = 0, cols = 1;
 const paged = () => mode === 'page';
 document.body.classList.toggle('paged', paged());
 
@@ -445,101 +442,109 @@ const pageRatio = () => (pages > 1 ? page / (pages - 1) : 1);
 const pageAnimOn = () => localStorage.getItem('ebook:pageAnim') !== '0'
   && !matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// วัดความกว้างหน้าแล้วให้เนื้อหาไหลเป็นคอลัมน์ทีละหน้า — เรียกซ้ำได้เสมอ (จำสัดส่วนตำแหน่งเดิม)
-// ต้นฉบับ (#content) ถูกซ่อนไว้ใช้วัดอย่างเดียว ตัวที่แสดงจริงคือสมุด StPageFlip
+/* วัดพื้นที่อ่านแล้วให้เนื้อหาไหลเป็นคอลัมน์ = หน้ากระดาษ
+   จอกว้าง (แท็บเล็ตแนวนอน/คอม) ใช้ 2 คอลัมน์ต่อหนึ่งหน้า เหมือนหนังสือกางออก */
+const step = () => cols * (colW + PAGE_GAP);
+
 function layoutPages(ratio) {
   if (!paged()) return;
   const c = $('content');
   if (ratio == null) ratio = pageRatio();
-  c.style.columnWidth = ''; // วัดความกว้างจริงก่อน
+  c.style.columnWidth = c.style.columnGap = '';
   pageW = c.clientWidth;
-  c.style.columnWidth = pageW + 'px';
+  pageH = c.clientHeight;
+  cols = pageW >= 860 ? 2 : 1;
+  colW = Math.floor((pageW - (cols - 1) * PAGE_GAP) / cols);
+  c.style.columnWidth = colW + 'px';
   c.style.columnGap = PAGE_GAP + 'px';
-  pages = Math.max(1, Math.round((c.scrollWidth + PAGE_GAP) / (pageW + PAGE_GAP)));
+  const totalCols = Math.max(1, Math.round((c.scrollWidth + PAGE_GAP) / (colW + PAGE_GAP)));
+  pages = Math.max(1, Math.ceil(totalCols / cols));
   page = Math.min(pages - 1, Math.max(0, Math.round(ratio * (pages - 1))));
-  buildFlipBook();
+  jumpTo(page);
+  buildLeaf();
   updatePagedUI();
 }
 
-/* สมุดพลิกหน้า (StPageFlip): สร้างหน้าเป็น div แยก — แต่ละหน้า clone เนื้อหาทั้งบท
-   แล้วเลื่อนไปยังคอลัมน์ของหน้านั้น (เหมือนหน้าต่างส่องคอลัมน์ที่ i) */
-let flip = null;
-function destroyFlip() {
-  if (flip) { try { flip.destroy(); } catch {} flip = null; }
-  // flip.destroy() ของ StPageFlip ถอด container ออกจาก DOM ไปด้วย — ถ้าหายให้สร้างคืน
-  let holder = $('flipBook');
-  if (!holder) {
-    holder = document.createElement('div');
-    holder.id = 'flipBook';
-    document.querySelector('.reader-main').appendChild(holder);
-  }
-  holder.innerHTML = '';
-  holder.removeAttribute('style');
+function jumpTo(p) {
+  $('content').style.transform = `translateX(${-p * step()}px)`;
 }
 
-function buildFlipBook() {
-  destroyFlip();
+/* ใบกระดาษสำหรับอนิเมชันพลิก — สำเนาเนื้อหาชุดเดียว ใช้ซ้ำทุกครั้งที่พลิก
+   (ไม่สำเนาแยกรายหน้า ซึ่งทำให้ DOM บวมจนกระตุก) */
+let leafEl = null, leafInner = null, leafShade = null, leafAnim = null;
+let contentStamp = 0, leafStamp = -1;
+const markContentChanged = () => { contentStamp++; };
+
+function buildLeaf() {
   const c = $('content');
-  const main = document.querySelector('.reader-main');
-  const holder = $('flipBook');
-  const pageH = c.clientHeight;
-
-  // วาง flipBook ทับตำแหน่งของ #content พอดีเป๊ะ
-  const cr = c.getBoundingClientRect(), mr = main.getBoundingClientRect();
-  holder.style.left = (cr.left - mr.left) + 'px';
-  holder.style.top = (cr.top - mr.top) + 'px';
-  holder.style.width = pageW + 'px';
-  holder.style.height = pageH + 'px';
-
-  for (let i = 0; i < pages; i++) {
-    const pg = document.createElement('div');
-    pg.className = 'flip-page';
-    const inner = document.createElement('div');
-    inner.className = 'content flip-inner';
-    inner.style.cssText = `width:${pageW}px;height:${pageH}px;column-width:${pageW}px;` +
-      `column-gap:${PAGE_GAP}px;column-fill:auto;transform:translateX(${-i * (pageW + PAGE_GAP)}px)`;
-    inner.innerHTML = c.innerHTML;
-    pg.appendChild(inner);
-    holder.appendChild(pg);
+  if (!leafEl) {
+    leafEl = document.createElement('div');
+    leafEl.className = 'flip-leaf';
+    leafInner = document.createElement('div');
+    leafInner.className = 'content flip-leaf-inner';
+    leafShade = document.createElement('div');
+    leafShade.className = 'flip-leaf-shade';
+    leafEl.append(leafInner, leafShade);
+    document.querySelector('.reader-main').appendChild(leafEl);
   }
-
-  flip = new St.PageFlip(holder, {
-    width: pageW,
-    height: pageH,
-    size: 'fixed',
-    usePortrait: true,
-    showCover: false,
-    autoSize: false,
-    maxShadowOpacity: 0.4,
-    flippingTime: 550,
-    mobileScrollSupport: false,
-    clickEventForward: true, // คลิกลิงก์ในหน้าได้ปกติ
-    swipeDistance: 30,
-  });
-  flip.loadFromHTML(holder.querySelectorAll('.flip-page'));
-  if (page > 0) flip.turnToPage(page);
-  // ผู้ใช้ลากมุม/ปัด/คลิกพลิกเองผ่านไลบรารี → sync ตำแหน่งกลับมาที่เรา
-  flip.on('flip', e => {
-    page = e.data;
-    updatePagedUI();
-  });
+  finishLeaf();
+  const main = document.querySelector('.reader-main');
+  const cr = c.getBoundingClientRect(), mr = main.getBoundingClientRect();
+  leafEl.style.left = (cr.left - mr.left) + 'px';
+  leafEl.style.top = (cr.top - mr.top) + 'px';
+  leafEl.style.width = pageW + 'px';
+  leafEl.style.height = pageH + 'px';
+  leafInner.style.cssText =
+    `width:${pageW}px;height:${pageH}px;column-width:${colW}px;column-gap:${PAGE_GAP}px;column-fill:auto`;
+  if (leafStamp !== contentStamp) { // สำเนาใหม่เฉพาะตอนเนื้อหาเปลี่ยนจริง
+    leafInner.innerHTML = c.innerHTML;
+    leafStamp = contentStamp;
+  }
+  leafEl.style.display = 'none';
 }
 
+const FLIP_MS = 420;
 function setPage(n, animate = true) {
-  page = Math.min(Math.max(0, n), pages - 1);
-  if (flip) {
-    const cur = flip.getCurrentPageIndex();
-    if (cur !== page) {
-      if (animate && pageAnimOn()) {
-        if (page === cur + 1) flip.flipNext();
-        else if (page === cur - 1) flip.flipPrev();
-        else flip.flip(page);
-      } else {
-        flip.turnToPage(page);
-      }
-    }
+  const from = page;
+  const to = Math.min(Math.max(0, n), pages - 1);
+  page = to;
+  if (to !== from) {
+    // พลิกทีละหน้าเท่านั้นที่ใช้อนิเมชัน — กระโดดข้ามหลายหน้า (สารบัญ/ค้นหา) ตัดไปเลย
+    if (animate && pageAnimOn() && leafEl && Math.abs(to - from) === 1) runFlip(from, to);
+    else { finishLeaf(); jumpTo(to); }
   }
   updatePagedUI();
+}
+
+/* งานปิดท้ายของใบที่กำลังพลิก — เก็บไว้เรียกเองได้ ถ้าผู้ใช้พลิกรัวจนใบก่อนยังไม่ทันจบ
+   (ปล่อยให้อนิเมชันซ้อนกันคือที่มาของอาการกระพริบ/กระตุก) */
+let leafDone = null;
+function finishLeaf() {
+  const fn = leafDone;
+  leafDone = null;
+  if (fn) fn();
+}
+
+function runFlip(from, to) {
+  finishLeaf();
+  [leafEl, leafShade].forEach(el => el.getAnimations().forEach(a => a.cancel()));
+
+  const fwd = to > from;
+  leafInner.style.transform = `translateX(${-(fwd ? from : to) * step()}px)`;
+  leafEl.style.display = 'block';
+  jumpTo(fwd ? to : from); // ใบกระดาษบังอยู่ ข้างล่างสลับหน้าได้ทันทีโดยไม่เห็น
+
+  const opts = { duration: FLIP_MS, easing: 'cubic-bezier(0.32, 0.08, 0.24, 1)', fill: 'forwards' };
+  const turn = [{ transform: 'rotateY(0deg)' }, { transform: 'rotateY(-176deg)' }];
+  const shade = [{ opacity: 0 }, { opacity: 0.5 }];
+  const anim = leafEl.animate(fwd ? turn : [...turn].reverse(), opts);
+  leafShade.animate(fwd ? shade : [...shade].reverse(), { ...opts, easing: 'linear' });
+
+  leafDone = () => {
+    if (!fwd) jumpTo(to); // ย้อนกลับ: ใบลงมาปิดจอแล้วค่อยสลับหน้าข้างล่างให้ตรงกัน
+    leafEl.style.display = 'none';
+  };
+  anim.onfinish = finishLeaf;
 }
 
 let posSaveTimer = null;
@@ -572,7 +577,8 @@ function applyMode() {
   if (paged()) {
     layoutPages(saved > 0 && saved <= 1 ? saved : 0);
   } else {
-    destroyFlip();
+    finishLeaf();
+    if (leafEl) leafEl.style.display = 'none';
     c.style.columnWidth = c.style.columnGap = c.style.transform = '';
     pages = 1; page = 0;
     requestAnimationFrame(() => {
@@ -590,8 +596,15 @@ function relayout() {
 }
 addEventListener('resize', relayout);
 
-// การแตะ/ลาก/ปัดบนตัวหนังสือในโหมดพลิกหน้า StPageFlip จัดการเองทั้งหมด
-// (ลากมุมหน้ากระดาษพับตามนิ้วได้จริง) — เราแค่รับ event 'flip' มา sync ตำแหน่ง
+// แตะฝั่งซ้าย/ขวาของจอเพื่อพลิกหน้า (โซนกว้าง 30% ให้กดง่ายบนแท็บเล็ต)
+document.querySelector('.reader-main').addEventListener('click', e => {
+  if (!paged() || navBusy) return;
+  if (e.target.closest('a, button, input, textarea, .table-wrap, pre, .mermaid-box')) return;
+  if (String(getSelection())) return; // กำลังลากเลือกข้อความ ไม่ใช่การแตะเปลี่ยนหน้า
+  const x = e.clientX / innerWidth;
+  if (x < 0.3) flipPage(-1);
+  else if (x > 0.7) flipPage(1);
+});
 
 /* ---------- เปลี่ยนบทแบบไม่ reload หน้า ---------- */
 
@@ -617,8 +630,7 @@ async function navTo(n, { push = true, entry = 'auto' } = {}) {
   // โหมดเลื่อน: อนิเมชันพลิกทั้งบทแบบ 3D / โหมดแบ่งหน้า: fade สั้น ๆ
   // (rotateY ใช้กับโหมดแบ่งหน้าไม่ได้ เพราะ keyframe จะทับ translateX ของหน้า)
   const anim = pageAnimOn();
-  // โหมดพลิกหน้า ตัวที่มองเห็นคือ #flipBook — fade ที่มันแทน #content ที่ซ่อนอยู่
-  const animEl = paged() ? $('flipBook') : $('content');
+  const animEl = $('content');
   const outCls = paged() ? 'page-fade-out' : (dir > 0 ? 'turn-out-next' : 'turn-out-prev');
   const inCls = paged() ? 'page-fade-in' : (dir > 0 ? 'turn-in-next' : 'turn-in-prev');
   if (anim) await animateClass(animEl, outCls);
@@ -649,7 +661,7 @@ document.addEventListener('click', e => {
 let swipeStart = null;
 addEventListener('touchstart', e => {
   // โหมดพลิกหน้า: StPageFlip รับ gesture เอง — อย่าจับซ้ำ เดี๋ยวพลิกทีเดียวสองหน้า
-  swipeStart = (!paged() && e.touches.length === 1 &&
+  swipeStart = (e.touches.length === 1 &&
     !document.body.classList.contains('drawer-open') &&
     !e.target.closest('.table-wrap, .mermaid-box, pre'))
     ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
@@ -794,13 +806,14 @@ async function renderChapter(n, q, entry = 'auto') {
   // สูตรคณิต + สีโค้ด รอให้เสร็จก่อนคืนตำแหน่งอ่าน (เร็ว, ไฟล์เล็ก)
   // ส่วน mermaid หนักกว่ามาก ปล่อยวาดตามหลัง แล้วค่อยจัดหน้าใหม่เมื่อวาดเสร็จ
   await Promise.all([renderMath(content, math), highlightCode(content)]);
-  renderMermaid(content).then(() => relayout());
+  renderMermaid(content).then(() => { markContentChanged(); relayout(); });
   content.querySelectorAll('img').forEach(img => {
     if (!img.complete) img.addEventListener('load', relayout, { once: true });
   });
 
   // ถ้ามาจากหน้าค้นหา (?q=) ไฮไลต์คำแล้วพาไปจุดแรกที่เจอ ไม่งั้นคืนตำแหน่งอ่านล่าสุด
   const firstHit = highlightQuery(content, q);
+  markContentChanged();
   const saved = parseFloat(localStorage.getItem(keyPos()));
   requestAnimationFrame(() => {
     if (paged()) {
@@ -812,7 +825,7 @@ async function renderChapter(n, q, entry = 'auto') {
       if (firstHit) {
         // กระโดดไปหน้าที่คำค้นอยู่ (ระยะ x ในคอลัมน์ → หมายเลขหน้า)
         const dx = firstHit.getBoundingClientRect().left - content.getBoundingClientRect().left;
-        setPage(Math.floor(dx / (pageW + PAGE_GAP)), false);
+        setPage(Math.floor(dx / step()), false);
       }
     } else if (firstHit) {
       firstHit.scrollIntoView({ block: 'center' });
