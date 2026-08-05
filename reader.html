@@ -453,16 +453,36 @@ function layoutPages(ratio) {
   c.style.columnWidth = c.style.columnGap = '';
   pageW = c.clientWidth;
   pageH = c.clientHeight;
-  cols = pageW >= 860 ? 2 : 1;
+  /* หน้าซ้าย-ขวา (2 คอลัมน์) เมื่อพื้นที่อ่าน "กว้างกว่าสูง" และกว้างพอให้แต่ละคอลัมน์อ่านสบาย
+     — แท็บเล็ตแนวนอนบางรุ่นกว้างแค่ ~820px แต่สูงแค่ ~400px คอลัมน์เดียวจะบรรทัดยาวจนอ่านยาก
+     ส่วนแนวตั้งใช้หน้าเดียวเต็มจอเหมือน ebook reader ทั่วไป */
+  cols = (pageW >= 660 && (pageW >= 1000 || pageW > pageH * 1.15)) ? 2 : 1;
+  document.body.classList.toggle('spread', cols === 2);
   colW = Math.floor((pageW - (cols - 1) * PAGE_GAP) / cols);
   c.style.columnWidth = colW + 'px';
   c.style.columnGap = PAGE_GAP + 'px';
+  // ก้อนที่ตั้งกฎ "ห้ามตัดกลาง" ไว้ ถ้าดันสูงเกินหนึ่งหน้า จะถูกคอลัมน์ตัดทิ้งจนเนื้อหาหาย
+  // → ก้อนไหนสูงเกินหน้า ยอมให้ไหลข้ามหน้าแทน (วัดแล้วจัดคอลัมน์ใหม่)
+  if (relaxTallBlocks(c)) {
+    c.style.columnWidth = '';
+    c.style.columnWidth = colW + 'px';
+  }
   const totalCols = Math.max(1, Math.round((c.scrollWidth + PAGE_GAP) / (colW + PAGE_GAP)));
   pages = Math.max(1, Math.ceil(totalCols / cols));
   page = Math.min(pages - 1, Math.max(0, Math.round(ratio * (pages - 1))));
   jumpTo(page);
   buildLeaf();
   updatePagedUI();
+}
+
+const NO_BREAK_SEL = '.note, .tip, .warning, blockquote, figure, li, .katex-display';
+function relaxTallBlocks(c) {
+  let changed = false;
+  c.querySelectorAll(NO_BREAK_SEL).forEach(el => {
+    const want = el.getBoundingClientRect().height > pageH * 0.92 ? 'auto' : '';
+    if (el.style.breakInside !== want) { el.style.breakInside = want; changed = true; }
+  });
+  return changed;
 }
 
 function jumpTo(p) {
@@ -595,6 +615,8 @@ function relayout() {
   relayoutTimer = setTimeout(() => layoutPages(), 150);
 }
 addEventListener('resize', relayout);
+// หมุนจอ: บางเบราว์เซอร์บนแท็บเล็ต/มือถือรายงานขนาดใหม่ช้ากว่าที่ event ยิง — วัดซ้ำอีกรอบ
+addEventListener('orientationchange', () => { relayout(); setTimeout(layoutPages, 400); });
 
 // แตะฝั่งซ้าย/ขวาของจอเพื่อพลิกหน้า (โซนกว้าง 30% ให้กดง่ายบนแท็บเล็ต)
 document.querySelector('.reader-main').addEventListener('click', e => {

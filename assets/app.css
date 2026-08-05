@@ -901,6 +901,7 @@ body.paged .content {
   backface-visibility: hidden;
 }
 
+/* ของที่ย่อ/ตัดข้ามหน้าไม่ได้ ถ้าสูงเกินหน้า ให้เลื่อนดูในกรอบตัวเองแทนที่จะถูกตัดหาย */
 body.paged .content .table-wrap,
 body.paged .content pre,
 body.paged .content .mermaid-box {
@@ -945,6 +946,10 @@ body.paged .content h1,
 body.paged .content h2,
 body.paged .content h3,
 body.paged .content h4 { break-after: avoid; break-inside: avoid; }
+
+body.paged .content img,
+body.paged .content svg,
+body.paged .content video { max-height: 86%; object-fit: contain; }
 
 body.paged .content .table-wrap,
 body.paged .content pre,
@@ -1001,6 +1006,19 @@ body.paged .content img { break-inside: avoid; }
   .btn .btn-label { display: none; }
 }
 
+/* เส้นสันหนังสือ ตอนแสดงหน้าซ้าย-ขวา ให้เห็นชัดว่าเป็นสองหน้า */
+body.paged.spread .reader-main::after {
+  content: '';
+  position: absolute;
+  top: 1.2rem;
+  bottom: 0.8rem;
+  left: 50%;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* ---------- ใบกระดาษที่พลิก ---------- */
 
 .flip-leaf {
@@ -1030,3 +1048,18 @@ body.paged .content img { break-inside: avoid; }
 
 .content.page-fade-out { animation: page-fade 0.14s ease-in both; }
 .content.page-fade-in  { animation: page-fade 0.18s ease-out both reverse; }
+
+/* จอเตี้ย (แนวนอนบนแท็บเล็ต/มือถือ): บีบแถบบน-ล่างเพื่อคืนพื้นที่อ่านให้มากที่สุด */
+@media (max-height: 620px) {
+  :root { --header-h: 2.7rem; }
+  .bottombar { padding-top: 0.25rem; padding-bottom: calc(0.25rem + env(safe-area-inset-bottom)); }
+  .bottombar .btn { height: 2.1rem; font-size: 0.85rem; }
+  .topbar .btn { height: 2.1rem; }
+  .topbar .title { font-size: 0.95rem; }
+  .topbar .title small { display: none; }
+  body.paged .reader-main {
+    height: calc(100dvh - var(--header-h) - 2.9rem - env(safe-area-inset-bottom));
+    padding-top: 0.5rem;
+    padding-bottom: 0.3rem;
+  }
+}
