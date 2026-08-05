@@ -634,3 +634,28 @@ mark.search-hit {
 }
 .drawer-foot label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
 .drawer-foot input { accent-color: var(--accent); }
+
+/* ---------- โหมดพลิกหน้าแบบ ebook reader (แบ่งเนื้อหาเป็นหน้าพอดีจอ) ----------
+   ใช้ CSS multi-column: content สูงเท่าพื้นที่อ่าน ไหลเป็นคอลัมน์กว้างเท่าหน้า
+   ทีละคอลัมน์ = หนึ่งหน้า แล้วเลื่อนด้วย translateX ทีละหน้า */
+
+body.paged { overflow: hidden; height: 100dvh; }
+body.paged .reader-main {
+  height: calc(100dvh - var(--header-h) - 3.6rem - env(safe-area-inset-bottom));
+  padding-top: 1.1rem;
+  padding-bottom: 0.4rem;
+  overflow: hidden;
+}
+body.paged .content {
+  height: 100%;
+  column-fill: auto;
+  transition: transform 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+body.paged .content .table-wrap,
+body.paged .content pre,
+body.paged .content .mermaid-box { max-height: 92%; overflow: auto; }
+
+/* เปลี่ยนบทในโหมดแบ่งหน้า: fade สั้น ๆ (rotateY ใช้ไม่ได้เพราะจะทับ translateX ของหน้า) */
+@keyframes page-fade { from { opacity: 1; } to { opacity: 0; } }
+.content.page-fade-out { animation: page-fade 0.14s ease-in both; }
+.content.page-fade-in  { animation: page-fade 0.18s ease-out both reverse; }

@@ -64,7 +64,8 @@
   </header>
   <ol id="tocList"></ol>
   <div class="drawer-foot">
-    <label><input type="checkbox" id="animToggle"> 📖 อนิเมชันพลิกหน้า (ปัดซ้าย/ขวาเพื่อเปลี่ยนบท)</label>
+    <label><input type="checkbox" id="modeToggle"> 📄 โหมดพลิกหน้าแบบ ebook (ปิด = เลื่อนอ่านแนวตั้ง)</label>
+    <label><input type="checkbox" id="animToggle"> 📖 อนิเมชันตอนพลิก</label>
   </div>
 </aside>
 
@@ -91,7 +92,7 @@ function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   localStorage.setItem('ebook:theme', t);
   $('themeBtn').textContent = THEME_ICON[t];
-  renderMermaid($('content')); // แผนภาพต้องวาดใหม่ให้สีเข้ากับธีม
+  renderMermaid($('content')).then(() => relayout()); // แผนภาพต้องวาดใหม่ให้สีเข้ากับธีม
 }
 $('themeBtn').textContent = THEME_ICON[document.documentElement.dataset.theme] || '🌙';
 $('themeBtn').addEventListener('click', () => {
@@ -107,6 +108,7 @@ function setFontSize(px) {
   px = Math.min(26, Math.max(14, px));
   localStorage.setItem('ebook:fontSize', px);
   document.documentElement.style.setProperty('--reader-font', px + 'px');
+  relayout(); // จำนวนหน้าเปลี่ยนตามขนาดตัวอักษร
 }
 $('fontUp').addEventListener('click', () => setFontSize(fontSize() + 1));
 $('fontDown').addEventListener('click', () => setFontSize(fontSize() - 1));
@@ -140,6 +142,8 @@ function applyFont(id) {
     localStorage.removeItem('ebook:font:css');
   }
   renderFontPop();
+  relayout();
+  document.fonts.ready.then(() => relayout()); // จัดหน้าอีกรอบเมื่อฟอนต์ดาวน์โหลดเสร็จจริง
 }
 
 function renderFontPop() {
@@ -204,7 +208,7 @@ function scrollRatio() {
 
 let saveTimer = null;
 function onScroll() {
-  if (!ready) return;
+  if (!ready || paged()) return; // โหมดพลิกหน้าไม่มี scroll — ตำแหน่งดูแลโดย setPage()
   const r = scrollRatio();
   $('readProgress').style.width = (r * 100) + '%';
   if (r >= 0.9) markDone();
@@ -213,7 +217,7 @@ function onScroll() {
 }
 addEventListener('scroll', onScroll, { passive: true });
 addEventListener('pagehide', () => {
-  if (ready) localStorage.setItem(keyPos(), scrollRatio().toFixed(4));
+  if (ready) localStorage.setItem(keyPos(), (paged() ? pageRatio() : scrollRatio()).toFixed(4));
 });
 
 /* ---------- rendering ---------- */
@@ -402,22 +406,126 @@ function renderToc() {
 
 function renderNav() {
   const total = book.chapters.length;
-  $('posBtn').textContent = `บทที่ ${ch}/${total}`;
-  $('prevBtn').disabled = ch <= 1;
-  $('nextBtn').disabled = ch >= total;
-  $('prevBtn').onclick = () => navTo(ch - 1);
-  $('nextBtn').onclick = () => navTo(ch + 1);
+  if (paged()) {
+    $('prevBtn').textContent = '‹ หน้าก่อน';
+    $('nextBtn').textContent = 'หน้าถัดไป ›';
+    $('prevBtn').onclick = () => flipPage(-1);
+    $('nextBtn').onclick = () => flipPage(1);
+    updatePagedUI();
+  } else {
+    $('prevBtn').textContent = '‹ บทก่อนหน้า';
+    $('nextBtn').textContent = 'บทถัดไป ›';
+    $('posBtn').textContent = `บทที่ ${ch}/${total}`;
+    $('prevBtn').disabled = ch <= 1;
+    $('nextBtn').disabled = ch >= total;
+    $('prevBtn').onclick = () => navTo(ch - 1);
+    $('nextBtn').onclick = () => navTo(ch + 1);
+  }
 }
 
 addEventListener('keydown', e => {
   if (e.target.closest('input, textarea')) return;
-  if (e.key === 'ArrowLeft') navTo(ch - 1);
-  if (e.key === 'ArrowRight') navTo(ch + 1);
+  if (e.key === 'ArrowLeft') paged() ? flipPage(-1) : navTo(ch - 1);
+  if (e.key === 'ArrowRight') paged() ? flipPage(1) : navTo(ch + 1);
 });
 
-/* ---------- เปลี่ยนบทแบบไม่ reload หน้า + อนิเมชันพลิกหน้ากระดาษ ---------- */
+/* ---------- โหมดพลิกหน้าแบบ ebook (แบ่งเนื้อหาเป็นหน้าพอดีจอ) ---------- */
 
-const pageAnimOn = () => localStorage.getItem('ebook:pageAnim') !== '0';
+const PAGE_GAP = 48;
+let mode = localStorage.getItem('ebook:readMode') || 'page';
+let page = 0, pages = 1, pageW = 0;
+const paged = () => mode === 'page';
+document.body.classList.toggle('paged', paged());
+
+const pageRatio = () => (pages > 1 ? page / (pages - 1) : 1);
+const pageAnimOn = () => localStorage.getItem('ebook:pageAnim') !== '0'
+  && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// วัดความกว้างหน้าแล้วให้เนื้อหาไหลเป็นคอลัมน์ทีละหน้า — เรียกซ้ำได้เสมอ (จำสัดส่วนตำแหน่งเดิม)
+function layoutPages(ratio) {
+  if (!paged()) return;
+  const c = $('content');
+  if (ratio == null) ratio = pageRatio();
+  c.style.columnWidth = ''; // วัดความกว้างจริงก่อน
+  pageW = c.clientWidth;
+  c.style.columnWidth = pageW + 'px';
+  c.style.columnGap = PAGE_GAP + 'px';
+  pages = Math.max(1, Math.round((c.scrollWidth + PAGE_GAP) / (pageW + PAGE_GAP)));
+  setPage(Math.round(ratio * (pages - 1)), false);
+}
+
+function setPage(n, animate = true) {
+  page = Math.min(Math.max(0, n), pages - 1);
+  const c = $('content');
+  if (animate && pageAnimOn()) {
+    c.style.transform = `translateX(${-page * (pageW + PAGE_GAP)}px)`;
+  } else {
+    c.style.transition = 'none';
+    c.style.transform = `translateX(${-page * (pageW + PAGE_GAP)}px)`;
+    void c.offsetWidth; // force reflow ให้ transition กลับมาทำงานครั้งถัดไป
+    c.style.transition = '';
+  }
+  updatePagedUI();
+}
+
+let posSaveTimer = null;
+function updatePagedUI() {
+  if (!paged() || !book) return;
+  const r = pageRatio();
+  $('readProgress').style.width = (r * 100) + '%';
+  if (ready) {
+    if (r >= 0.9) markDone();
+    clearTimeout(posSaveTimer);
+    posSaveTimer = setTimeout(() => localStorage.setItem(keyPos(), r.toFixed(4)), 250);
+  }
+  $('posBtn').textContent = `บทที่ ${ch}/${book.chapters.length} · หน้า ${page + 1}/${pages}`;
+  $('prevBtn').disabled = ch <= 1 && page <= 0;
+  $('nextBtn').disabled = ch >= book.chapters.length && page >= pages - 1;
+}
+
+// พลิกทีละหน้า — สุดบทแล้วไหลข้ามไปบทถัดไป/ก่อนหน้าให้เอง
+function flipPage(dir) {
+  if (!paged() || navBusy || !book) return;
+  if (dir > 0 && page >= pages - 1) return navTo(ch + 1, { entry: 'start' });
+  if (dir < 0 && page <= 0) return navTo(ch - 1, { entry: 'end' });
+  setPage(page + dir);
+}
+
+function applyMode() {
+  document.body.classList.toggle('paged', paged());
+  const c = $('content');
+  const saved = parseFloat(localStorage.getItem(keyPos()));
+  if (paged()) {
+    layoutPages(saved > 0 && saved <= 1 ? saved : 0);
+  } else {
+    c.style.columnWidth = c.style.columnGap = c.style.transform = '';
+    pages = 1; page = 0;
+    requestAnimationFrame(() => {
+      const el = document.scrollingElement;
+      el.scrollTop = (saved > 0.01 && saved < 0.99) ? saved * (el.scrollHeight - el.clientHeight) : 0;
+    });
+  }
+}
+
+// จัดหน้าใหม่เมื่อ layout เปลี่ยน (หมุนจอ, ปรับฟอนต์, รูป/แผนภาพเพิ่งโหลดเสร็จ)
+let relayoutTimer = null;
+function relayout() {
+  clearTimeout(relayoutTimer);
+  relayoutTimer = setTimeout(() => layoutPages(), 150);
+}
+addEventListener('resize', relayout);
+
+// แตะขอบจอซ้าย/ขวาเพื่อพลิกหน้า (เหมือน ebook reader ทั่วไป)
+document.querySelector('.reader-main').addEventListener('click', e => {
+  if (!paged() || navBusy) return;
+  if (e.target.closest('a, button, input, textarea')) return;
+  if (String(getSelection())) return; // กำลังเลือกข้อความอยู่ — ไม่ใช่การแตะเปลี่ยนหน้า
+  const x = e.clientX / innerWidth;
+  if (x < 0.18) flipPage(-1);
+  else if (x > 0.82) flipPage(1);
+});
+
+/* ---------- เปลี่ยนบทแบบไม่ reload หน้า ---------- */
 
 function animateClass(el, cls) {
   return new Promise(resolve => {
@@ -430,20 +538,24 @@ function animateClass(el, cls) {
 }
 
 let navBusy = false;
-async function navTo(n, { push = true } = {}) {
+async function navTo(n, { push = true, entry = 'auto' } = {}) {
   if (navBusy || !book || !(n >= 1 && n <= book.chapters.length) || n === ch) return;
   navBusy = true;
   const dir = n > ch ? 1 : -1;
-  if (ready) localStorage.setItem(keyPos(), scrollRatio().toFixed(4)); // จำตำแหน่งบทเดิมก่อนออก
+  if (ready) localStorage.setItem(keyPos(), (paged() ? pageRatio() : scrollRatio()).toFixed(4));
   ready = false;
   toggleDrawer(false);
 
-  const anim = pageAnimOn() && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // โหมดเลื่อน: อนิเมชันพลิกทั้งบทแบบ 3D / โหมดแบ่งหน้า: fade สั้น ๆ
+  // (rotateY ใช้กับโหมดแบ่งหน้าไม่ได้ เพราะ keyframe จะทับ translateX ของหน้า)
+  const anim = pageAnimOn();
   const content = $('content');
-  if (anim) await animateClass(content, dir > 0 ? 'turn-out-next' : 'turn-out-prev');
+  const outCls = paged() ? 'page-fade-out' : (dir > 0 ? 'turn-out-next' : 'turn-out-prev');
+  const inCls = paged() ? 'page-fade-in' : (dir > 0 ? 'turn-in-next' : 'turn-in-prev');
+  if (anim) await animateClass(content, outCls);
   if (push) history.pushState(null, '', chapterUrl(n));
-  await renderChapter(n);
-  if (anim) await animateClass(content, dir > 0 ? 'turn-in-next' : 'turn-in-prev');
+  await renderChapter(n, null, entry);
+  if (anim) await animateClass(content, inCls);
   navBusy = false;
 }
 
@@ -480,10 +592,21 @@ addEventListener('touchend', e => {
   const dt = Date.now() - swipeStart.t;
   swipeStart = null;
   if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || dt > 600) return;
-  navTo(dx < 0 ? ch + 1 : ch - 1); // ปัดซ้าย = บทถัดไป (เหมือนพลิกหนังสือ)
+  // ปัดซ้าย = ไปข้างหน้า (เหมือนพลิกหนังสือ) — โหมดแบ่งหน้าพลิกทีละหน้า, โหมดเลื่อนข้ามทีละบท
+  const dir = dx < 0 ? 1 : -1;
+  paged() ? flipPage(dir) : navTo(ch + dir);
 }, { passive: true });
 
-$('animToggle').checked = pageAnimOn();
+$('modeToggle').checked = paged();
+$('modeToggle').addEventListener('change', () => {
+  if (ready) localStorage.setItem(keyPos(), (paged() ? pageRatio() : scrollRatio()).toFixed(4));
+  mode = $('modeToggle').checked ? 'page' : 'scroll';
+  localStorage.setItem('ebook:readMode', mode);
+  applyMode();
+  if (book) renderNav();
+});
+
+$('animToggle').checked = localStorage.getItem('ebook:pageAnim') !== '0';
 $('animToggle').addEventListener('change', () => {
   localStorage.setItem('ebook:pageAnim', $('animToggle').checked ? '1' : '0');
 });
@@ -510,7 +633,7 @@ async function load() {
   await renderChapter(n, params.get('q'));
 }
 
-async function renderChapter(n, q) {
+async function renderChapter(n, q, entry = 'auto') {
   const content = $('content');
   ch = n;
   localStorage.setItem('ebook:last:' + bookId, ch);
@@ -584,24 +707,38 @@ async function renderChapter(n, q) {
   });
 
   // สูตรคณิต + สีโค้ด รอให้เสร็จก่อนคืนตำแหน่งอ่าน (เร็ว, ไฟล์เล็ก)
-  // ส่วน mermaid หนักกว่ามาก ปล่อยวาดตามหลังโดยไม่บล็อกการอ่าน
+  // ส่วน mermaid หนักกว่ามาก ปล่อยวาดตามหลัง แล้วค่อยจัดหน้าใหม่เมื่อวาดเสร็จ
   await Promise.all([renderMath(content, math), highlightCode(content)]);
-  renderMermaid(content);
+  renderMermaid(content).then(() => relayout());
+  content.querySelectorAll('img').forEach(img => {
+    if (!img.complete) img.addEventListener('load', relayout, { once: true });
+  });
 
-  // ถ้ามาจากหน้าค้นหา (?q=) ไฮไลต์คำแล้วเลื่อนไปจุดแรกที่เจอ ไม่งั้นคืนตำแหน่งอ่านล่าสุด
+  // ถ้ามาจากหน้าค้นหา (?q=) ไฮไลต์คำแล้วพาไปจุดแรกที่เจอ ไม่งั้นคืนตำแหน่งอ่านล่าสุด
   const firstHit = highlightQuery(content, q);
   const saved = parseFloat(localStorage.getItem(keyPos()));
   requestAnimationFrame(() => {
-    if (firstHit) {
+    if (paged()) {
+      document.scrollingElement.scrollTop = 0;
+      let r = 0;
+      if (entry === 'end') r = 1;
+      else if (entry === 'auto' && saved > 0 && saved <= 1) r = saved;
+      layoutPages(r);
+      if (firstHit) {
+        // กระโดดไปหน้าที่คำค้นอยู่ (ระยะ x ในคอลัมน์ → หมายเลขหน้า)
+        const dx = firstHit.getBoundingClientRect().left - content.getBoundingClientRect().left;
+        setPage(Math.floor(dx / (pageW + PAGE_GAP)), false);
+      }
+    } else if (firstHit) {
       firstHit.scrollIntoView({ block: 'center' });
-    } else if (saved > 0.01 && saved < 0.99) {
+    } else if (entry === 'auto' && saved > 0.01 && saved < 0.99) {
       const el = document.scrollingElement;
       el.scrollTop = saved * (el.scrollHeight - el.clientHeight);
     } else {
       document.scrollingElement.scrollTop = 0; // บทใหม่เริ่มบนสุด (สำคัญตอนสลับบทแบบไม่ reload)
     }
     ready = true;
-    onScroll();
+    paged() ? updatePagedUI() : onScroll();
   });
 }
 
