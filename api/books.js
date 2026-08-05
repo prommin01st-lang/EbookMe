@@ -1,6 +1,7 @@
 /* API ฝั่งคลาวด์ของ EbookMe (รันเป็น Vercel Serverless Function)
    - GET    /api/books                    → สารบัญหนังสือคลาวด์ (อ่านได้สาธารณะ)
    - POST   /api/books                    → อัปโหลด/แก้ไขบท (ต้องแนบ key)
+   - PATCH  /api/books                    → แก้ชื่อเล่ม/คำอธิบาย/ปก/ชื่อบท (ต้องแนบ key)
    - DELETE /api/books?bookId=..[&file=..] → ลบบทหรือทั้งเล่ม (ต้องแนบ key)
    ต้องตั้ง env บน Vercel: BLOB_READ_WRITE_TOKEN (จากการเชื่อม Blob store) และ UPLOAD_KEY */
 
@@ -133,6 +134,26 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, book: bookId, ch, url: blob.url });
     }
 
+    if (req.method === 'PATCH') {
+      // แก้ข้อมูลหนังสือ/ชื่อบทใน catalog อย่างเดียว — ไม่แตะไฟล์เนื้อหา
+      const { bookId, title, description, cover, chapters } = req.body || {};
+      const catalog = await readCatalog();
+      const book = catalog.books.find(b => b.id === bookId);
+      if (!book) return res.status(404).json({ error: 'ไม่พบหนังสือ' });
+
+      if (typeof title === 'string' && title.trim()) book.title = title.trim();
+      if (typeof description === 'string') book.description = description.trim();
+      if (typeof cover === 'string' && cover.trim()) book.cover = cover.trim();
+      if (Array.isArray(chapters)) {
+        for (const c of chapters) {
+          const target = book.chapters.find(x => x.file === (c && c.file));
+          if (target && typeof c.title === 'string' && c.title.trim()) target.title = c.title.trim();
+        }
+      }
+      await writeCatalog(catalog);
+      return res.status(200).json({ ok: true });
+    }
+
     if (req.method === 'DELETE') {
       // req.query อาจไม่ถูก populate ในบาง runtime — parse จาก URL เองเป็น fallback
       const qs = new URL(req.url || '', 'http://internal').searchParams;
@@ -156,7 +177,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    res.setHeader('Allow', 'GET, POST, DELETE');
+    res.setHeader('Allow', 'GET, POST, PATCH, DELETE');
     return res.status(405).json({ error: 'method not allowed' });
   } catch (e) {
     return res.status(500).json({ error: String((e && e.message) || e) });
