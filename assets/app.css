@@ -488,3 +488,92 @@ body.drawer-open .drawer-overlay { opacity: 1; pointer-events: auto; }
   color: var(--text-dim);
   padding: 4rem 1rem;
 }
+
+/* ---------- syntax highlighting (highlight.js) ----------
+   ไม่ใช้ธีม css ของ hljs ตรง ๆ — กำหนดสี token เองผ่านตัวแปร
+   จะได้เปลี่ยนตามธีมสว่าง/ซีเปีย/มืดของเว็บทันทีเหมือนส่วนอื่น */
+
+:root[data-theme="light"], :root[data-theme="sepia"] {
+  --hl-comment: #6a737d;
+  --hl-keyword: #d73a49;
+  --hl-string:  #22863a;
+  --hl-number:  #005cc5;
+  --hl-title:   #6f42c1;
+  --hl-attr:    #005cc5;
+  --hl-meta:    #b08800;
+}
+:root[data-theme="dark"] {
+  --hl-comment: #8b949e;
+  --hl-keyword: #ff7b72;
+  --hl-string:  #7ee787;
+  --hl-number:  #79c0ff;
+  --hl-title:   #d2a8ff;
+  --hl-attr:    #79c0ff;
+  --hl-meta:    #e3b341;
+}
+
+.content .hljs { background: transparent; color: inherit; padding: 0; }
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-tag, .hljs-name, .hljs-deletion { color: var(--hl-keyword); }
+.hljs-string, .hljs-regexp, .hljs-addition { color: var(--hl-string); }
+.hljs-number, .hljs-literal, .hljs-built_in, .hljs-builtin-name, .hljs-symbol, .hljs-bullet { color: var(--hl-number); }
+.hljs-title, .hljs-section, .hljs-function .hljs-title, .hljs-title.function_, .hljs-title.class_ { color: var(--hl-title); }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-selector-attr,
+.hljs-selector-class, .hljs-selector-id, .hljs-type, .hljs-params { color: var(--hl-attr); }
+.hljs-meta, .hljs-doctag { color: var(--hl-meta); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+/* ---------- mermaid ---------- */
+
+.mermaid-box {
+  margin: 1.4em 0;
+  text-align: center;
+  overflow-x: auto;
+  color: var(--text-dim);
+}
+.mermaid-box svg { max-width: 100%; height: auto; }
+
+/* ---------- ผลค้นหา / ไฮไลต์คำค้น ---------- */
+
+mark.search-hit {
+  background: var(--warn-bd);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+:root[data-theme="dark"] mark.search-hit { color: #121417; background: #e3b341; }
+
+.search-panel {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0.8rem 1rem 0;
+  display: none;
+}
+.search-panel.open { display: block; }
+.search-panel input {
+  width: 100%;
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+}
+.search-panel input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.search-status { color: var(--text-dim); font-size: 0.85rem; padding: 0.5rem 0.2rem; }
+.search-results { list-style: none; margin: 0.4rem 0 1rem; padding: 0; }
+.search-results li + li { margin-top: 0.5rem; }
+.search-results a {
+  display: block;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  text-decoration: none;
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.search-results .where { font-size: 0.82rem; color: var(--accent); font-weight: 600; }
+.search-results .snippet { font-size: 0.9rem; color: var(--text-dim); overflow-wrap: break-word; }

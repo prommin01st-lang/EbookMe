@@ -13,6 +13,9 @@
     if (fs >= 14 && fs <= 26) document.documentElement.style.setProperty('--reader-font', fs + 'px');
   })();
 </script>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2563eb">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="assets/app.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
 </head>
@@ -73,6 +76,7 @@ function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   localStorage.setItem('ebook:theme', t);
   $('themeBtn').textContent = THEME_ICON[t];
+  renderMermaid($('content')); // แผนภาพต้องวาดใหม่ให้สีเข้ากับธีม
 }
 $('themeBtn').textContent = THEME_ICON[document.documentElement.dataset.theme] || '🌙';
 $('themeBtn').addEventListener('click', () => {
@@ -159,6 +163,144 @@ function stripForeignStyles(root) {
   });
 }
 
+/* ---------- ตัวเสริมการแสดงผล (โหลดไลบรารีเฉพาะบทที่ต้องใช้) ---------- */
+
+const loadedAssets = {};
+function loadAsset(src, isCss) {
+  if (!loadedAssets[src]) loadedAssets[src] = new Promise((resolve, reject) => {
+    let el;
+    if (isCss) { el = document.createElement('link'); el.rel = 'stylesheet'; el.href = src; }
+    else { el = document.createElement('script'); el.src = src; }
+    el.onload = resolve;
+    el.onerror = () => reject(new Error('โหลด ' + src + ' ไม่สำเร็จ'));
+    document.head.appendChild(el);
+  });
+  return loadedAssets[src];
+}
+
+/* สูตรคณิต: marked ชอบกิน _ ^ \ ในสูตร เลยต้องดึงสูตรออกมาเก็บก่อน parse
+   (ใส่ placeholder เป็นอักขระ private-use แทน) แล้วค่อยให้ KaTeX วาดทีหลัง
+   รองรับ $...$, $$...$$, \( \), \[ \] — ข้ามส่วนที่อยู่ใน code fence/inline code */
+const M_OPEN = '\uE000', M_CLOSE = '\uE001'; // อักขระ private-use ไม่มีทางโผล่ในเนื้อหาจริง
+function extractMath(src) {
+  const found = [];
+  const grab = (tex, display) => `${M_OPEN}${found.push({ tex, display }) - 1}${M_CLOSE}`;
+  const mathify = txt => txt
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => grab(tex, true))
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => grab(tex, true))
+    .replace(/\\\((.+?)\\\)/g, (_, tex) => grab(tex, false))
+    // inline $...$: ห้ามช่องว่างชิดขอบ และ $ ปิดต้องไม่ตามด้วยตัวเลข (กันราคาเงิน)
+    .replace(/(?<![\\$\w])\$(?!\s)((?:\\.|[^$\n])+?)(?<![\s\\])\$(?!\d)/g, (_, tex) => grab(tex, false));
+
+  /* ตรวจ code fence แบบรายบรรทัด — ใช้ regex กวาดทั้งไฟล์ไม่ได้ เพราะ ``` ที่โผล่
+     ใน inline code (เช่นเซลล์ตารางสอน markdown) จะหลอกให้จับคู่ fence เพี้ยนทั้งไฟล์ */
+  const out = [];
+  let text = [];
+  let inFence = false, closer = '';
+  const flushText = () => {
+    if (!text.length) return;
+    // กัน inline code ก่อน (backtick เปิด-ปิดยาวเท่ากัน ตาม CommonMark) แล้วค่อยจับสูตรจากที่เหลือ
+    const spans = [];
+    const kept = text.join('\n').replace(/(?<!`)(`+)(?!`)([\s\S]*?)(?<!`)\1(?!`)/g,
+      m => '\uE002' + (spans.push(m) - 1) + '\uE003');
+    out.push(mathify(kept).replace(/\uE002(\d+)\uE003/g, (_, i) => spans[+i]));
+    text = [];
+  };
+  for (const line of src.split('\n')) {
+    const t = line.trim();
+    if (!inFence && /^(`{3,}|~{3,})/.test(t)) {
+      flushText();
+      inFence = true;
+      closer = t[0].repeat(3);
+      out.push(line);
+    } else if (inFence) {
+      out.push(line);
+      if (t.startsWith(closer)) inFence = false;
+    } else {
+      text.push(line);
+    }
+  }
+  flushText();
+  return { out: out.join('\n'), found };
+}
+
+async function renderMath(root, found) {
+  if (!found.length) return;
+  try {
+    await Promise.all([
+      loadAsset('assets/katex/katex.min.css', true),
+      loadAsset('assets/katex/katex.min.js'),
+    ]);
+  } catch { return; }
+  const splitter = new RegExp(`${M_OPEN}(\\d+)${M_CLOSE}`);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) if (walker.currentNode.nodeValue.includes(M_OPEN)) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    const span = document.createElement('span');
+    span.innerHTML = node.nodeValue.split(splitter).map((part, i) => {
+      if (i % 2 === 0) return esc(part);
+      const { tex, display } = found[+part];
+      try { return katex.renderToString(tex, { displayMode: display, throwOnError: false }); }
+      catch { return esc(tex); }
+    }).join('');
+    node.replaceWith(...span.childNodes);
+  });
+}
+
+async function highlightCode(root) {
+  const blocks = [...root.querySelectorAll('pre code')];
+  if (!blocks.length) return;
+  try { await loadAsset('assets/highlight.min.js'); } catch { return; }
+  blocks.forEach(c => { try { hljs.highlightElement(c); } catch {} });
+}
+
+async function renderMermaid(root) {
+  const boxes = [...root.querySelectorAll('.mermaid-box')];
+  if (!boxes.length) return;
+  try { await loadAsset('assets/mermaid.min.js'); } catch { return; }
+  const dark = document.documentElement.dataset.theme === 'dark';
+  mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'neutral', fontFamily: 'inherit' });
+  for (const [i, box] of boxes.entries()) {
+    const id = `mmd-${ch}-${i}-${(renderMermaid.n = (renderMermaid.n || 0) + 1)}`;
+    try {
+      const { svg } = await mermaid.render(id, box.dataset.src);
+      box.innerHTML = svg;
+    } catch (e) {
+      document.getElementById('d' + id)?.remove(); // mermaid ทิ้ง element ค้างไว้ตอน parse พัง
+      box.innerHTML = `<div class="content-error">วาดแผนภาพ mermaid ไม่สำเร็จ: ${esc(String(e.message || e))}</div>`;
+    }
+  }
+}
+
+/* ไฮไลต์คำค้น (มาจากหน้า search ผ่าน ?q=) — คืน <mark> ตัวแรกไว้เลื่อนจอไปหา */
+function highlightQuery(root, q) {
+  if (!q || !q.trim()) return null;
+  const needle = q.toLowerCase();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) {
+    const n = walker.currentNode;
+    if (n.nodeValue.toLowerCase().includes(needle)) nodes.push(n);
+  }
+  nodes.forEach(node => {
+    const text = node.nodeValue, lower = text.toLowerCase();
+    const frag = document.createDocumentFragment();
+    let i = 0, at;
+    while ((at = lower.indexOf(needle, i)) !== -1) {
+      frag.append(text.slice(i, at));
+      const m = document.createElement('mark');
+      m.className = 'search-hit';
+      m.textContent = text.slice(at, at + q.length);
+      frag.append(m);
+      i = at + q.length;
+    }
+    frag.append(text.slice(i));
+    node.replaceWith(frag);
+  });
+  return root.querySelector('mark.search-hit');
+}
+
 // แปลง GitHub-style callout (> [!NOTE] ฯลฯ) เป็นกล่อง note/tip/warning
 function convertCallouts(root) {
   const map = { NOTE: 'note', TIP: 'tip', WARNING: 'warning', IMPORTANT: 'note', CAUTION: 'warning' };
@@ -237,9 +379,12 @@ async function load() {
     return;
   }
 
+  let math = [];
   if (/\.md([?#].*)?$/i.test(chapter.path)) {
-    // ไฟล์ markdown — แปลงเป็น HTML ด้วย marked
-    content.innerHTML = marked.parse(raw);
+    // ไฟล์ markdown — ดึงสูตรคณิตออกก่อน แล้วแปลงเป็น HTML ด้วย marked
+    const ex = extractMath(raw);
+    math = ex.found;
+    content.innerHTML = marked.parse(ex.out);
     convertCallouts(content);
   } else {
     // ไฟล์ HTML — รองรับทั้งไฟล์เต็ม (เอาเฉพาะ body) และ fragment
@@ -247,6 +392,15 @@ async function load() {
     content.innerHTML = doc.body.innerHTML;
   }
   stripForeignStyles(content);
+
+  // ```mermaid (หรือ <pre class="mermaid">) → กล่องแผนภาพ วาดแบบ lazy ทีหลัง
+  content.querySelectorAll('code.language-mermaid, pre.mermaid, div.mermaid').forEach(el => {
+    const box = document.createElement('div');
+    box.className = 'mermaid-box';
+    box.dataset.src = el.textContent;
+    box.textContent = '⏳ กำลังวาดแผนภาพ…';
+    (el.closest('pre') || el).replaceWith(box);
+  });
 
   // ตารางกว้าง ๆ ให้เลื่อนแนวนอนได้ในกรอบตัวเอง
   content.querySelectorAll('table').forEach(t => {
@@ -263,10 +417,18 @@ async function load() {
     a.rel = 'noopener';
   });
 
-  // คืนตำแหน่งอ่านล่าสุดของบทนี้
+  // สูตรคณิต + สีโค้ด รอให้เสร็จก่อนคืนตำแหน่งอ่าน (เร็ว, ไฟล์เล็ก)
+  // ส่วน mermaid หนักกว่ามาก ปล่อยวาดตามหลังโดยไม่บล็อกการอ่าน
+  await Promise.all([renderMath(content, math), highlightCode(content)]);
+  renderMermaid(content);
+
+  // ถ้ามาจากหน้าค้นหา (?q=) ไฮไลต์คำแล้วเลื่อนไปจุดแรกที่เจอ ไม่งั้นคืนตำแหน่งอ่านล่าสุด
+  const firstHit = highlightQuery(content, params.get('q'));
   const saved = parseFloat(localStorage.getItem(keyPos()));
   requestAnimationFrame(() => {
-    if (saved > 0.01 && saved < 0.99) {
+    if (firstHit) {
+      firstHit.scrollIntoView({ block: 'center' });
+    } else if (saved > 0.01 && saved < 0.99) {
       const el = document.scrollingElement;
       el.scrollTop = saved * (el.scrollHeight - el.clientHeight);
     }
@@ -276,6 +438,9 @@ async function load() {
 }
 
 load();
+</script>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>
