@@ -36,7 +36,8 @@ async function loadCloudBooks() {
         chapters: (b.chapters || []).map(c => ({
           // แนบ ?v=เวลาที่อัปเดต เพื่อ bust cache ของ CDN เฉพาะตอนไฟล์เปลี่ยนจริง
           path: c.url + (c.updated ? `?v=${c.updated}` : ''),
-          title: c.title
+          title: c.title,
+          file: c.file // ชื่อไฟล์ตอนอัปโหลด — reader ใช้ map ลิงก์ข้ามบท
         }))
       }))
       .filter(b => b.id && b.chapters.length);

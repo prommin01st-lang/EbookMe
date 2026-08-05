@@ -411,6 +411,20 @@ async function load() {
     w.append(t);
   });
 
+  // ลิงก์ข้ามบทแบบ relative (เช่นจากไฟล์สารบัญ: [บทที่ 5](05-attention.md))
+  // → เปิดบทนั้นผ่าน reader แทนที่จะ 404
+  const chapterNo = new Map(book.chapters.map((c, i) => {
+    const base = c.file || decodeURIComponent((c.path || '').split(/[?#]/)[0].split('/').pop());
+    return [base, i + 1];
+  }));
+  content.querySelectorAll('a[href]').forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href || /^[a-z][a-z0-9+.-]*:|^[/#]/i.test(href)) return; // URL เต็ม, /path, #anchor — ไม่แตะ
+    const base = decodeURIComponent(href.split(/[?#]/)[0].split('/').pop());
+    const n = chapterNo.get(base);
+    if (n) a.setAttribute('href', chapterUrl(n));
+  });
+
   // ลิงก์ออกนอกให้เปิดแท็บใหม่
   content.querySelectorAll('a[href^="http"]').forEach(a => {
     a.target = '_blank';
