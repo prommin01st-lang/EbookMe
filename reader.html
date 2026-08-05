@@ -38,6 +38,7 @@
   <button class="btn" id="fontDown" title="ลดขนาดตัวอักษร" style="font-size:0.85rem">A−</button>
   <button class="btn" id="fontUp" title="เพิ่มขนาดตัวอักษร" style="font-size:1.15rem">A+</button>
   <button class="btn" id="fontBtn" title="เลือกฟอนต์">🔤</button>
+  <button class="btn" id="modeBtn" title="สลับโหมดอ่าน (พลิกหน้า/เลื่อนแนวตั้ง)">📄</button>
   <button class="btn" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
   <button class="btn" id="tocBtn" title="สารบัญ">☰</button>
 </header>
@@ -597,14 +598,26 @@ addEventListener('touchend', e => {
   paged() ? flipPage(dir) : navTo(ch + dir);
 }, { passive: true });
 
-$('modeToggle').checked = paged();
-$('modeToggle').addEventListener('change', () => {
+// สลับโหมดได้ 2 ที่: ปุ่ม 📄/📜 บน topbar และสวิตช์ใน drawer — ใช้ logic เดียวกัน
+function setMode(m) {
+  if (m === mode) return;
   if (ready) localStorage.setItem(keyPos(), (paged() ? pageRatio() : scrollRatio()).toFixed(4));
-  mode = $('modeToggle').checked ? 'page' : 'scroll';
+  mode = m;
   localStorage.setItem('ebook:readMode', mode);
   applyMode();
   if (book) renderNav();
-});
+  syncModeUI();
+}
+function syncModeUI() {
+  $('modeToggle').checked = paged();
+  $('modeBtn').textContent = paged() ? '📄' : '📜';
+  $('modeBtn').title = paged()
+    ? 'กำลังอ่านแบบพลิกหน้า — แตะเพื่อสลับเป็นเลื่อนแนวตั้ง'
+    : 'กำลังอ่านแบบเลื่อนแนวตั้ง — แตะเพื่อสลับเป็นพลิกหน้า';
+}
+syncModeUI();
+$('modeBtn').addEventListener('click', () => setMode(paged() ? 'scroll' : 'page'));
+$('modeToggle').addEventListener('change', () => setMode($('modeToggle').checked ? 'page' : 'scroll'));
 
 $('animToggle').checked = localStorage.getItem('ebook:pageAnim') !== '0';
 $('animToggle').addEventListener('change', () => {

@@ -659,3 +659,20 @@ body.paged .content .mermaid-box { max-height: 92%; overflow: auto; }
 @keyframes page-fade { from { opacity: 1; } to { opacity: 0; } }
 .content.page-fade-out { animation: page-fade 0.14s ease-in both; }
 .content.page-fade-in  { animation: page-fade 0.18s ease-out both reverse; }
+
+/* กติกาการแบ่งหน้า: ไม่ตัดกลางก้อนเนื้อหา ให้ยกไปขึ้นหน้าใหม่ทั้งก้อนแทน */
+body.paged .content h1,
+body.paged .content h2,
+body.paged .content h3,
+body.paged .content h4 { break-after: avoid; break-inside: avoid; }
+body.paged .content .table-wrap,
+body.paged .content pre,
+body.paged .content .mermaid-box,
+body.paged .content .note,
+body.paged .content .tip,
+body.paged .content .warning,
+body.paged .content blockquote,
+body.paged .content figure,
+body.paged .content img,
+body.paged .content .katex-display { break-inside: avoid; }
+body.paged .content p { orphans: 2; widows: 2; }
