@@ -1,0 +1,16 @@
+{
+  "name": "EbookMe",
+  "short_name": "EbookMe",
+  "description": "เว็บอ่าน ebook ส่วนตัว — สรุปเนื้อหาที่เรียนจาก AI",
+  "lang": "th",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f3",
+  "theme_color": "#2563eb",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
