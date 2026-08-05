@@ -1063,3 +1063,8 @@ body.paged.spread .reader-main::after {
     padding-bottom: 0.3rem;
   }
 }
+
+/* ระหว่างจัดหน้า/คืนตำแหน่งอ่าน ซ่อนเนื้อหาไว้ก่อน แล้วค่อยเฟดเข้า
+   ไม่งั้นจะเห็นหน้าแรกแวบหนึ่งแล้วกระโดดไปหน้าที่ค้างไว้ ดูเหมือนเนื้อหาหาย */
+.content { transition: opacity 0.16s ease-out; }
+body.laying-out .content { opacity: 0; transition: none; }

@@ -450,6 +450,7 @@ function layoutPages(ratio) {
   if (!paged()) return;
   const c = $('content');
   if (ratio == null) ratio = pageRatio();
+  c.style.transform = 'translateX(0px)'; // วัดทุกอย่างจากตำแหน่งศูนย์เสมอ
   c.style.columnWidth = c.style.columnGap = '';
   pageW = c.clientWidth;
   pageH = c.clientHeight;
@@ -467,12 +468,29 @@ function layoutPages(ratio) {
     c.style.columnWidth = '';
     c.style.columnWidth = colW + 'px';
   }
-  const totalCols = Math.max(1, Math.round((c.scrollWidth + PAGE_GAP) / (colW + PAGE_GAP)));
-  pages = Math.max(1, Math.ceil(totalCols / cols));
+  /* นับหน้าจาก "ตำแหน่งเนื้อหาชิ้นสุดท้ายจริง ๆ" ไม่ใช่ scrollWidth
+     เพราะ scrollWidth มักเผื่อคอลัมน์ว่างท้ายบทไว้ ทำให้มีหน้าเปล่าให้พลิกไปเจอ */
+  pages = Math.max(1, Math.ceil(lastContentCol(c) / cols));
   page = Math.min(pages - 1, Math.max(0, Math.round(ratio * (pages - 1))));
   jumpTo(page);
   buildLeaf();
   updatePagedUI();
+}
+
+// คอลัมน์ที่เนื้อหาชิ้นสุดท้ายไปตกอยู่ (นับจาก 1) — ใช้ตอนวัดโดย transform อยู่ที่ 0
+function lastContentCol(c) {
+  const baseLeft = c.getBoundingClientRect().left;
+  let endX = 0;
+  c.querySelectorAll('*').forEach(el => {
+    // ชิ้นส่วนข้างใน <svg> (แผนภาพ mermaid) รายงานขนาดตามพิกัดในภาพ ซึ่งใหญ่เกินกรอบจริงมาก
+    // → วัดที่ตัว <svg> แทน ไม่งั้นจะนับหน้าเกินจนมีหน้าเปล่าท้ายบท
+    if (el.ownerSVGElement) return;
+    if (el.firstElementChild && el.tagName !== 'svg') return; // เอาเฉพาะชิ้นในสุดที่มีเนื้อหาจริง
+    const r = el.getBoundingClientRect();
+    if (r.height > 0 && r.width > 0) endX = Math.max(endX, r.right - baseLeft);
+  });
+  endX = Math.min(endX, c.scrollWidth); // กันค่าหลุดกรอบจากเนื้อหาแปลก ๆ อื่น
+  return Math.max(1, Math.ceil((endX - 1) / (colW + PAGE_GAP)));
 }
 
 const NO_BREAK_SEL = '.note, .tip, .warning, blockquote, figure, li, .katex-display';
@@ -770,8 +788,11 @@ async function renderChapter(n, q, entry = 'auto') {
     raw = await res.text();
   } catch (e) {
     content.innerHTML = `<div class="content-error">โหลดไฟล์ <code>${esc(chapter.path)}</code> ไม่สำเร็จ</div>`;
+    document.body.classList.remove('laying-out');
     return;
   }
+
+  document.body.classList.add('laying-out'); // ซ่อนไว้จนจัดหน้า+คืนตำแหน่งเสร็จ
 
   let math = [];
   if (/\.md([?#].*)?$/i.test(chapter.path)) {
@@ -859,6 +880,7 @@ async function renderChapter(n, q, entry = 'auto') {
     }
     ready = true;
     paged() ? updatePagedUI() : onScroll();
+    document.body.classList.remove('laying-out');
   });
 }
 
