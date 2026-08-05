@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>📚 EbookMe — ชั้นหนังสือ</title>
+<title>📚 EbookMe — ห้องสมุดอีบุ๊กของฉัน</title>
 <script>
   (function () {
     var t = localStorage.getItem('ebook:theme');
@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#2563eb">
+<meta name="theme-color" content="#3b82f6">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="assets/app.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
@@ -29,20 +29,50 @@
 <body>
 
 <header class="topbar">
-  <span class="title" style="font-size:1.1rem">📚 EbookMe</span>
-  <button class="btn" id="searchBtn" title="ค้นหาในหนังสือทุกเล่ม">🔍</button>
-  <a class="btn" href="upload.html" title="อัปโหลดหนังสือขึ้นคลาวด์">＋</a>
-  <button class="btn" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
+  <a class="brand" href="index.html">
+    <span class="brand-icon">📚</span>
+    <span>EbookMe</span>
+  </a>
+  <div style="flex:1"></div>
+  <button class="btn" id="searchBtn" title="ค้นหาในหนังสือทุกเล่ม (Ctrl+K)">🔍<span class="btn-label"> ค้นหา</span></button>
+  <a class="btn primary" href="upload.html" title="เพิ่มหนังสือใหม่">＋<span class="btn-label"> เพิ่มหนังสือ</span></a>
+  <button class="btn btn-icon" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
 </header>
 
 <div class="search-panel" id="searchPanel">
-  <input type="search" id="searchInput" placeholder="ค้นหาในหนังสือทุกเล่ม… (อย่างน้อย 2 ตัวอักษร)">
+  <div class="search-box">
+    <input type="search" id="searchInput" placeholder="พิมพ์คำที่ต้องการค้นหาในเนื้อหาทุกเล่ม… (อย่างน้อย 2 ตัวอักษร)">
+  </div>
   <div class="search-status" id="searchStatus"></div>
   <ul class="search-results" id="searchResults"></ul>
 </div>
 
+<section class="hero-section">
+  <div class="hero-card">
+    <h1>ยินดีต้อนรับสู่ห้องสมุดส่วนตัว 📖</h1>
+    <p>คลังหนังสือดิจิทัลสำหรับอ่านไฟล์ Markdown และ HTML ปรับแต่งธีม แบบอักษร และระบบพลิกหน้าอ่านสมจริงได้ตามต้องการ</p>
+    <div class="hero-stats" id="heroStats">
+      <div class="stat-pill"><span>📚 หนังสือทั้งหมด:</span> <span class="num" id="totalBooksCount">...</span></div>
+      <div class="stat-pill"><span>✅ อ่านจบแล้ว:</span> <span class="num" id="completedCount">...</span></div>
+      <div id="quickResumeContainer"></div>
+    </div>
+  </div>
+</section>
+
+<div class="shelf-controls">
+  <h2 class="shelf-title">📖 ชั้นหนังสือ</h2>
+  <div class="filter-tabs" id="filterTabs">
+    <button class="filter-tab active" data-filter="all">ทั้งหมด</button>
+    <button class="filter-tab" data-filter="reading">กำลังอ่าน</button>
+    <button class="filter-tab" data-filter="completed">อ่านจบแล้ว</button>
+    <button class="filter-tab" data-filter="cloud">คลาวด์ ☁️</button>
+  </div>
+</div>
+
 <main class="shelf" id="shelf">
-  <div class="empty-state">กำลังโหลด…</div>
+  <div class="empty-state">
+    <h3>กำลังโหลดชั้นหนังสือ…</h3>
+  </div>
 </main>
 
 <script src="assets/catalog.js"></script>
@@ -74,59 +104,171 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
-async function loadShelf() {
+let allBooks = [];
+let currentFilter = 'all';
+
+function detectFormat(chapters) {
+  if (!chapters || !chapters.length) return 'HTML';
+  const hasMd = chapters.some(c => /\.md([?#].*)?$/i.test(c.path));
+  return hasMd ? 'MD' : 'HTML';
+}
+
+function updateHeroStats(books) {
+  document.getElementById('totalBooksCount').textContent = books.length;
+  let totalDone = 0;
+  let recentBook = null;
+  let recentTime = 0;
+
+  books.forEach(b => {
+    const total = (b.chapters || []).length;
+    const done = doneCount(b.id, total);
+    totalDone += done;
+
+    // เล่มที่เปิดล่าสุดจริง ๆ ตัดสินด้วย timestamp ตอนเปิดอ่าน
+    // (เล่มเก่าที่ยังไม่มี timestamp ให้ค่า 0 — แพ้เล่มที่มีเสมอ)
+    const lastCh = parseInt(localStorage.getItem('ebook:last:' + b.id), 10);
+    const openedAt = parseInt(localStorage.getItem('ebook:lastOpen:' + b.id), 10) || 0;
+    if (lastCh && (openedAt > recentTime || !recentBook)) {
+      recentBook = b;
+      recentTime = openedAt;
+    }
+  });
+
+  document.getElementById('completedCount').textContent = totalDone + ' บท';
+
+  const container = document.getElementById('quickResumeContainer');
+  if (recentBook) {
+    const total = (recentBook.chapters || []).length;
+    const last = parseInt(localStorage.getItem('ebook:last:' + recentBook.id), 10) || 1;
+    container.innerHTML = `
+      <a href="reader.html?book=${encodeURIComponent(recentBook.id)}&ch=${last}" class="resume-btn">
+        ▶ อ่านต่อล่าสุด: ${esc(recentBook.title)} (บทที่ ${last})
+      </a>`;
+  } else if (books.length > 0) {
+    container.innerHTML = `
+      <a href="reader.html?book=${encodeURIComponent(books[0].id)}&ch=1" class="resume-btn">
+        ▶ เริ่มอ่านเล่มแรก
+      </a>`;
+  } else {
+    container.innerHTML = '';
+  }
+}
+
+function renderBooks() {
   const shelf = document.getElementById('shelf');
-  let books;
-  try {
-    books = await loadCatalog();
-  } catch (e) {
-    shelf.innerHTML = `<div class="error-state">
-      <p><strong>โหลด books.html ไม่สำเร็จ</strong></p>
-      <p>ถ้าเปิดไฟล์ตรง ๆ (file://) เบราว์เซอร์จะบล็อกการอ่านไฟล์ ต้องรันผ่านเซิร์ฟเวอร์ก่อน:</p>
-      <p><code>python3 -m http.server 8000</code> แล้วเปิด <code>http://localhost:8000</code></p>
-    </div>`;
+  let filtered = allBooks;
+
+  if (currentFilter === 'reading') {
+    filtered = allBooks.filter(b => {
+      const total = (b.chapters || []).length;
+      const done = doneCount(b.id, total);
+      return done > 0 && done < total;
+    });
+  } else if (currentFilter === 'completed') {
+    filtered = allBooks.filter(b => {
+      const total = (b.chapters || []).length;
+      const done = doneCount(b.id, total);
+      return total > 0 && done === total;
+    });
+  } else if (currentFilter === 'cloud') {
+    filtered = allBooks.filter(b => b.cloud);
+  }
+
+  if (!filtered.length) {
+    shelf.innerHTML = `
+      <div class="empty-state">
+        <h3>ไม่พบหนังสือในหมวดนี้ 📭</h3>
+        <p>คุณสามารถเพิ่มหนังสือเล่มใหม่ด้วยไฟล์ Markdown หรือ HTML ได้ทันที</p>
+        <a href="upload.html" class="btn primary" style="margin-top:0.5rem">＋ เพิ่มหนังสือใหม่</a>
+      </div>`;
     return;
   }
 
-  if (!books.length) {
-    shelf.innerHTML = `<div class="empty-state">ยังไม่มีหนังสือ — เพิ่ม <code>&lt;section class="book"&gt;</code> เล่มแรกใน <code>books.html</code> ได้เลย</div>`;
-    return;
-  }
-
-  shelf.innerHTML = books.map(b => {
+  shelf.innerHTML = filtered.map(b => {
     const total = (b.chapters || []).length;
     const done = doneCount(b.id, total);
     const pct = total ? Math.round(done / total * 100) : 0;
     const last = parseInt(localStorage.getItem('ebook:last:' + b.id), 10);
     const startCh = (last >= 1 && last <= total) ? last : 1;
-    const label = last ? `อ่านต่อ บทที่ ${startCh} ›` : 'เริ่มอ่าน ›';
+    const label = last ? `อ่านต่อ บทที่ ${startCh}` : 'เริ่มอ่าน';
+    const fmt = detectFormat(b.chapters);
+
     return `
       <a class="book-card" href="reader.html?book=${encodeURIComponent(b.id)}&ch=${startCh}">
-        <span class="cover">${esc(b.cover || '📘')}</span>
+        <div class="book-cover-container">
+          <div class="book-cover-3d">${esc(b.cover || '📘')}</div>
+          <div style="display:flex; gap:0.3rem;">
+            ${b.cloud ? '<span class="format-badge cloud">Cloud ☁️</span>' : ''}
+            <span class="format-badge ${fmt.toLowerCase()}">${fmt}</span>
+          </div>
+        </div>
         <h2>${esc(b.title)}</h2>
-        <p>${esc(b.description || '')}</p>
+        <p>${esc(b.description || 'ไม่มีรายละเอียด')}</p>
         <div class="progress-track"><div style="width:${pct}%"></div></div>
         <div class="meta">
-          <span>${b.cloud ? '☁️ ' : ''}${done}/${total} บท</span>
+          <span>${done}/${total} บท (${pct}%)</span>
           <span class="continue">${label}</span>
         </div>
       </a>`;
   }).join('');
 }
 
+async function loadShelf() {
+  const shelf = document.getElementById('shelf');
+  try {
+    allBooks = await loadCatalog();
+  } catch (e) {
+    shelf.innerHTML = `<div class="error-state">
+      <p><strong>โหลด catalog หนังสือไม่สำเร็จ</strong></p>
+      <p>หากเปิดไฟล์ตรง ๆ (file://) เบราว์เซอร์จะบล็อกการอ่านไฟล์ ต้องรันผ่านเซิร์ฟเวอร์ก่อน:</p>
+      <p><code>python3 -m http.server 8000</code> แล้วเปิด <code>http://localhost:8000</code></p>
+    </div>`;
+    return;
+  }
+
+  if (!allBooks.length) {
+    shelf.innerHTML = `<div class="empty-state">
+      <h3>ยังไม่มีหนังสือในชั้น 📚</h3>
+      <p>เพิ่ม <code>&lt;section class="book"&gt;</code> ใน <code>books.html</code> หรืออัปโหลดไฟล์ใหม่ได้เลย</p>
+      <a href="upload.html" class="btn primary" style="margin-top:0.5rem">＋ เพิ่มหนังสือเล่มแรก</a>
+    </div>`;
+    return;
+  }
+
+  updateHeroStats(allBooks);
+  renderBooks();
+}
+
+document.getElementById('filterTabs').addEventListener('click', e => {
+  const btn = e.target.closest('.filter-tab');
+  if (!btn) return;
+  document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = btn.dataset.filter;
+  renderBooks();
+});
+
 loadShelf();
 
-/* ---------- ค้นหาข้อความข้ามเล่ม (client-side ทั้งหมด) ---------- */
+/* ---------- ค้นหาข้อความข้ามเล่ม ---------- */
 
 const searchPanel = document.getElementById('searchPanel');
 const searchInput = document.getElementById('searchInput');
 const searchStatus = document.getElementById('searchStatus');
 const searchResults = document.getElementById('searchResults');
-let chapterTexts = null; // โหลดเนื้อหาทุกบทครั้งเดียวตอนค้นครั้งแรก แล้ว cache ไว้
+let chapterTexts = null;
 
 document.getElementById('searchBtn').addEventListener('click', () => {
   searchPanel.classList.toggle('open');
   if (searchPanel.classList.contains('open')) searchInput.focus();
+});
+
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    searchPanel.classList.toggle('open');
+    if (searchPanel.classList.contains('open')) searchInput.focus();
+  }
 });
 
 async function loadAllTexts() {
@@ -144,7 +286,7 @@ async function loadAllTexts() {
       }))
       .catch(() => null)
   )));
-  searchStatus.textContent = `กำลังโหลดเนื้อหา ${jobs.length} บท…`;
+  searchStatus.textContent = `กำลังค้นหาจากเนื้อหา ${jobs.length} บท…`;
   chapterTexts = (await Promise.all(jobs)).filter(Boolean);
   return chapterTexts;
 }
@@ -159,7 +301,7 @@ async function runSearch() {
     return;
   }
   const texts = await loadAllTexts();
-  if (searchInput.value.trim() !== q) return; // พิมพ์ต่อระหว่างโหลด — รอบใหม่จัดการเอง
+  if (searchInput.value.trim() !== q) return;
 
   const needle = q.toLowerCase();
   const found = [];
@@ -174,15 +316,16 @@ async function runSearch() {
   found.sort((a, b) => b.count - a.count);
 
   searchStatus.textContent = found.length
-    ? `เจอใน ${found.length} บท`
-    : `ไม่พบ "${q}" ในหนังสือเล่มไหนเลย`;
+    ? `พบบทความที่ตรงกัน ${found.length} บท`
+    : `ไม่พบคำว่า "${q}" ในหนังสือเล่มใดเลย`;
+
   const markRe = new RegExp(`(${escRe(q)})`, 'ig');
   searchResults.innerHTML = found.map(r => {
     const snipHtml = r.snip.split(markRe)
       .map((p, i) => i % 2 ? `<mark class="search-hit">${esc(p)}</mark>` : esc(p)).join('');
     return `
       <li><a href="reader.html?book=${encodeURIComponent(r.bookId)}&ch=${r.ch}&q=${encodeURIComponent(q)}">
-        <div class="where">${esc(r.bookTitle)} › บทที่ ${r.ch} ${esc(r.chTitle)} · ${r.count} จุด</div>
+        <div class="where">📖 ${esc(r.bookTitle)} › บทที่ ${r.ch} ${esc(r.chTitle)} (${r.count} จุด)</div>
         <div class="snippet">…${snipHtml}…</div>
       </a></li>`;
   }).join('');

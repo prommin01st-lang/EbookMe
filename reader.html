@@ -33,13 +33,13 @@
 <div class="read-progress" id="readProgress"></div>
 
 <header class="topbar">
-  <a class="btn" href="index.html" title="กลับชั้นหนังสือ">←</a>
+  <a class="btn" href="index.html" title="กลับชั้นหนังสือ">← <span class="btn-label">ชั้นหนังสือ</span></a>
   <span class="title" id="barTitle">กำลังโหลด…</span>
   <button class="btn" id="fontDown" title="ลดขนาดตัวอักษร" style="font-size:0.85rem">A−</button>
   <button class="btn" id="fontUp" title="เพิ่มขนาดตัวอักษร" style="font-size:1.15rem">A+</button>
-  <button class="btn" id="fontBtn" title="เลือกฟอนต์">🔤</button>
+  <button class="btn" id="fontBtn" title="เลือกฟอนต์">🔤<span class="btn-label"> ฟอนต์</span></button>
   <button class="btn" id="modeBtn" title="สลับโหมดอ่าน (พลิกหน้า/เลื่อนแนวตั้ง)">📄</button>
-  <button class="btn" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
+  <button class="btn btn-icon" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
   <button class="btn" id="tocBtn" title="สารบัญ">☰</button>
 </header>
 
@@ -49,6 +49,8 @@
   <article class="content" id="content">
     <div class="loading">กำลังโหลดเนื้อหา…</div>
   </article>
+  <!-- โหมดพลิกหน้า: #content เป็นต้นฉบับ (ซ่อนไว้ใช้วัด/แบ่งหน้า) ตัวที่เห็นคือสมุด StPageFlip -->
+  <div id="flipBook"></div>
 </main>
 
 <nav class="bottombar">
@@ -71,6 +73,7 @@
 </aside>
 
 <script src="assets/marked.min.js"></script>
+<script src="assets/page-flip.browser.js"></script>
 <script src="assets/catalog.js"></script>
 <script>
 const THEMES = ['light', 'sepia', 'dark'];
@@ -443,6 +446,7 @@ const pageAnimOn = () => localStorage.getItem('ebook:pageAnim') !== '0'
   && !matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // วัดความกว้างหน้าแล้วให้เนื้อหาไหลเป็นคอลัมน์ทีละหน้า — เรียกซ้ำได้เสมอ (จำสัดส่วนตำแหน่งเดิม)
+// ต้นฉบับ (#content) ถูกซ่อนไว้ใช้วัดอย่างเดียว ตัวที่แสดงจริงคือสมุด StPageFlip
 function layoutPages(ratio) {
   if (!paged()) return;
   const c = $('content');
@@ -452,19 +456,82 @@ function layoutPages(ratio) {
   c.style.columnWidth = pageW + 'px';
   c.style.columnGap = PAGE_GAP + 'px';
   pages = Math.max(1, Math.round((c.scrollWidth + PAGE_GAP) / (pageW + PAGE_GAP)));
-  setPage(Math.round(ratio * (pages - 1)), false);
+  page = Math.min(pages - 1, Math.max(0, Math.round(ratio * (pages - 1))));
+  buildFlipBook();
+  updatePagedUI();
+}
+
+/* สมุดพลิกหน้า (StPageFlip): สร้างหน้าเป็น div แยก — แต่ละหน้า clone เนื้อหาทั้งบท
+   แล้วเลื่อนไปยังคอลัมน์ของหน้านั้น (เหมือนหน้าต่างส่องคอลัมน์ที่ i) */
+let flip = null;
+function destroyFlip() {
+  if (flip) { try { flip.destroy(); } catch {} flip = null; }
+  const holder = $('flipBook');
+  holder.innerHTML = '';
+  holder.removeAttribute('style');
+}
+
+function buildFlipBook() {
+  destroyFlip();
+  const c = $('content');
+  const main = document.querySelector('.reader-main');
+  const holder = $('flipBook');
+  const pageH = c.clientHeight;
+
+  // วาง flipBook ทับตำแหน่งของ #content พอดีเป๊ะ
+  const cr = c.getBoundingClientRect(), mr = main.getBoundingClientRect();
+  holder.style.left = (cr.left - mr.left) + 'px';
+  holder.style.top = (cr.top - mr.top) + 'px';
+  holder.style.width = pageW + 'px';
+  holder.style.height = pageH + 'px';
+
+  for (let i = 0; i < pages; i++) {
+    const pg = document.createElement('div');
+    pg.className = 'flip-page';
+    const inner = document.createElement('div');
+    inner.className = 'content flip-inner';
+    inner.style.cssText = `width:${pageW}px;height:${pageH}px;column-width:${pageW}px;` +
+      `column-gap:${PAGE_GAP}px;column-fill:auto;transform:translateX(${-i * (pageW + PAGE_GAP)}px)`;
+    inner.innerHTML = c.innerHTML;
+    pg.appendChild(inner);
+    holder.appendChild(pg);
+  }
+
+  flip = new St.PageFlip(holder, {
+    width: pageW,
+    height: pageH,
+    size: 'fixed',
+    usePortrait: true,
+    showCover: false,
+    autoSize: false,
+    maxShadowOpacity: 0.4,
+    flippingTime: 550,
+    mobileScrollSupport: false,
+    clickEventForward: true, // คลิกลิงก์ในหน้าได้ปกติ
+    swipeDistance: 30,
+  });
+  flip.loadFromHTML(holder.querySelectorAll('.flip-page'));
+  if (page > 0) flip.turnToPage(page);
+  // ผู้ใช้ลากมุม/ปัด/คลิกพลิกเองผ่านไลบรารี → sync ตำแหน่งกลับมาที่เรา
+  flip.on('flip', e => {
+    page = e.data;
+    updatePagedUI();
+  });
 }
 
 function setPage(n, animate = true) {
   page = Math.min(Math.max(0, n), pages - 1);
-  const c = $('content');
-  if (animate && pageAnimOn()) {
-    c.style.transform = `translateX(${-page * (pageW + PAGE_GAP)}px)`;
-  } else {
-    c.style.transition = 'none';
-    c.style.transform = `translateX(${-page * (pageW + PAGE_GAP)}px)`;
-    void c.offsetWidth; // force reflow ให้ transition กลับมาทำงานครั้งถัดไป
-    c.style.transition = '';
+  if (flip) {
+    const cur = flip.getCurrentPageIndex();
+    if (cur !== page) {
+      if (animate && pageAnimOn()) {
+        if (page === cur + 1) flip.flipNext();
+        else if (page === cur - 1) flip.flipPrev();
+        else flip.flip(page);
+      } else {
+        flip.turnToPage(page);
+      }
+    }
   }
   updatePagedUI();
 }
@@ -499,6 +566,7 @@ function applyMode() {
   if (paged()) {
     layoutPages(saved > 0 && saved <= 1 ? saved : 0);
   } else {
+    destroyFlip();
     c.style.columnWidth = c.style.columnGap = c.style.transform = '';
     pages = 1; page = 0;
     requestAnimationFrame(() => {
@@ -516,15 +584,8 @@ function relayout() {
 }
 addEventListener('resize', relayout);
 
-// แตะขอบจอซ้าย/ขวาเพื่อพลิกหน้า (เหมือน ebook reader ทั่วไป)
-document.querySelector('.reader-main').addEventListener('click', e => {
-  if (!paged() || navBusy) return;
-  if (e.target.closest('a, button, input, textarea')) return;
-  if (String(getSelection())) return; // กำลังเลือกข้อความอยู่ — ไม่ใช่การแตะเปลี่ยนหน้า
-  const x = e.clientX / innerWidth;
-  if (x < 0.18) flipPage(-1);
-  else if (x > 0.82) flipPage(1);
-});
+// การแตะ/ลาก/ปัดบนตัวหนังสือในโหมดพลิกหน้า StPageFlip จัดการเองทั้งหมด
+// (ลากมุมหน้ากระดาษพับตามนิ้วได้จริง) — เราแค่รับ event 'flip' มา sync ตำแหน่ง
 
 /* ---------- เปลี่ยนบทแบบไม่ reload หน้า ---------- */
 
@@ -550,13 +611,14 @@ async function navTo(n, { push = true, entry = 'auto' } = {}) {
   // โหมดเลื่อน: อนิเมชันพลิกทั้งบทแบบ 3D / โหมดแบ่งหน้า: fade สั้น ๆ
   // (rotateY ใช้กับโหมดแบ่งหน้าไม่ได้ เพราะ keyframe จะทับ translateX ของหน้า)
   const anim = pageAnimOn();
-  const content = $('content');
+  // โหมดพลิกหน้า ตัวที่มองเห็นคือ #flipBook — fade ที่มันแทน #content ที่ซ่อนอยู่
+  const animEl = paged() ? $('flipBook') : $('content');
   const outCls = paged() ? 'page-fade-out' : (dir > 0 ? 'turn-out-next' : 'turn-out-prev');
   const inCls = paged() ? 'page-fade-in' : (dir > 0 ? 'turn-in-next' : 'turn-in-prev');
-  if (anim) await animateClass(content, outCls);
+  if (anim) await animateClass(animEl, outCls);
   if (push) history.pushState(null, '', chapterUrl(n));
   await renderChapter(n, null, entry);
-  if (anim) await animateClass(content, inCls);
+  if (anim) await animateClass(animEl, inCls);
   navBusy = false;
 }
 
@@ -580,7 +642,8 @@ document.addEventListener('click', e => {
 // และไม่ทำงานถ้าปัดในตาราง/แผนภาพ/โค้ดที่เลื่อนแนวนอนได้เอง
 let swipeStart = null;
 addEventListener('touchstart', e => {
-  swipeStart = (e.touches.length === 1 &&
+  // โหมดพลิกหน้า: StPageFlip รับ gesture เอง — อย่าจับซ้ำ เดี๋ยวพลิกทีเดียวสองหน้า
+  swipeStart = (!paged() && e.touches.length === 1 &&
     !document.body.classList.contains('drawer-open') &&
     !e.target.closest('.table-wrap, .mermaid-box, pre'))
     ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
@@ -610,7 +673,9 @@ function setMode(m) {
 }
 function syncModeUI() {
   $('modeToggle').checked = paged();
-  $('modeBtn').textContent = paged() ? '📄' : '📜';
+  $('modeBtn').innerHTML = paged()
+    ? '📄<span class="btn-label"> พลิกหน้า</span>'
+    : '📜<span class="btn-label"> เลื่อนอ่าน</span>';
   $('modeBtn').title = paged()
     ? 'กำลังอ่านแบบพลิกหน้า — แตะเพื่อสลับเป็นเลื่อนแนวตั้ง'
     : 'กำลังอ่านแบบเลื่อนแนวตั้ง — แตะเพื่อสลับเป็นพลิกหน้า';
@@ -650,6 +715,7 @@ async function renderChapter(n, q, entry = 'auto') {
   const content = $('content');
   ch = n;
   localStorage.setItem('ebook:last:' + bookId, ch);
+  localStorage.setItem('ebook:lastOpen:' + bookId, Date.now()); // ให้หน้าชั้นรู้ว่าเล่มไหนเปิดล่าสุดจริง ๆ
 
   const chapter = book.chapters[ch - 1];
   document.title = `${chapter.title} — ${book.title}`;
