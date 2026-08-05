@@ -166,6 +166,29 @@
   .emoji-pop button:hover { background: var(--accent-soft); }
 
   #summary .cover-line { font-size: 1.05rem; margin: 0.8rem 0 0.3rem; }
+
+  .prog-track {
+    height: 8px;
+    background: var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 0.9rem;
+  }
+  .prog-track > div {
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 0.25s ease;
+  }
+  #progText {
+    margin: 0.6rem 0 0;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 </style>
 </head>
 <body>
@@ -267,6 +290,14 @@
   <div class="status" id="status"></div>
 
 </main>
+
+<div class="modal-overlay" id="progressOverlay">
+  <div class="modal">
+    <h3 id="progTitle">⏳ กำลังอัปโหลด…</h3>
+    <div class="prog-track"><div id="progBar"></div></div>
+    <p id="progText"></p>
+  </div>
+</div>
 
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
@@ -616,6 +647,17 @@ async function api(method, payloadOrQuery, endpoint = 'api/books') {
   return data;
 }
 
+/* modal loading ระหว่างอัปโหลด — บล็อกหน้าจอไว้กันกดซ้ำ/ปิดหน้าโดยไม่ตั้งใจ */
+function showProgress(done, total, label) {
+  $('progressOverlay').classList.add('show');
+  $('progTitle').textContent = total > 1 ? `⏳ กำลังอัปโหลด ${done + 1}/${total} บท` : '⏳ กำลังอัปโหลด…';
+  $('progBar').style.width = Math.round(done / total * 100) + '%';
+  $('progText').textContent = label || '';
+}
+function hideProgress() {
+  $('progressOverlay').classList.remove('show');
+}
+
 /* --- อัปโหลดรูปประกอบ (ขึ้น Blob ทันทีที่เลือก แล้วแทรกลิงก์ให้) --- */
 function insertAtCursor(ta, text) {
   const s = ta.selectionStart ?? ta.value.length;
@@ -792,13 +834,12 @@ async function doUpload() {
   try {
     let firstCh = 1, doneBook = bookMeta.bookId;
     for (let i = 0; i < jobs.length; i++) {
-      showStatus(true, jobs.length === 1
-        ? '⏳ กำลังอัปโหลด…'
-        : `⏳ อัปโหลดบทที่ ${i + 1}/${jobs.length} — ${esc(jobs[i].chapterTitle)}`);
+      showProgress(i, jobs.length, jobs[i].chapterTitle);
       const r = await api('POST', { ...bookMeta, ...jobs[i] });
       if (i === 0) firstCh = r.ch;
       doneBook = r.book;
     }
+    $('progBar').style.width = '100%'; // ดันแถบให้เต็มแวบหนึ่งก่อนปิด
     localStorage.setItem('ebook:apikey', $('key').value.trim());
     setupSteps();
     const label = jobs.length > 1 ? `ครบ ${jobs.length} บท` : 'เรียบร้อย';
@@ -820,6 +861,7 @@ async function doUpload() {
     showStatus(false, '❌ ' + esc(e.message) + extra);
     if (e.status === 401) { localStorage.removeItem('ebook:apikey'); showKeyStep(); }
   } finally {
+    hideProgress();
     $('nextBtn').disabled = false;
     $('backBtn').disabled = false;
   }
