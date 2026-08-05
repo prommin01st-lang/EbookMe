@@ -11,8 +11,17 @@
     document.documentElement.dataset.theme = t;
     var fs = parseInt(localStorage.getItem('ebook:fontSize'), 10);
     if (fs >= 14 && fs <= 26) document.documentElement.style.setProperty('--reader-font', fs + 'px');
+    var ff = localStorage.getItem('ebook:font:family');
+    if (ff) {
+      var fc = localStorage.getItem('ebook:font:css');
+      if (fc) { var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = fc; document.head.appendChild(l); }
+      document.documentElement.style.setProperty('--font-ui',
+        "'" + ff + "', \"Noto Sans Thai\", \"Sarabun\", -apple-system, \"Segoe UI\", Roboto, sans-serif");
+    }
   })();
 </script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#2563eb">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
@@ -28,9 +37,12 @@
   <span class="title" id="barTitle">กำลังโหลด…</span>
   <button class="btn" id="fontDown" title="ลดขนาดตัวอักษร" style="font-size:0.85rem">A−</button>
   <button class="btn" id="fontUp" title="เพิ่มขนาดตัวอักษร" style="font-size:1.15rem">A+</button>
+  <button class="btn" id="fontBtn" title="เลือกฟอนต์">🔤</button>
   <button class="btn" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
   <button class="btn" id="tocBtn" title="สารบัญ">☰</button>
 </header>
+
+<div class="font-pop" id="fontPop"></div>
 
 <main class="reader-main">
   <article class="content" id="content">
@@ -95,6 +107,64 @@ function setFontSize(px) {
 }
 $('fontUp').addEventListener('click', () => setFontSize(fontSize() + 1));
 $('fontDown').addEventListener('click', () => setFontSize(fontSize() - 1));
+
+/* ---------- ฟอนต์อ่าน (Google Fonts โหลดเฉพาะตัวที่ใช้) ---------- */
+
+const FONT_FALLBACK = '"Noto Sans Thai", "Sarabun", "Thonburi", -apple-system, "Segoe UI", Roboto, sans-serif';
+const FONTS = [
+  { id: 'system',    name: 'ค่าเริ่มต้นของเครื่อง', family: null },
+  { id: 'sarabun',   name: 'Sarabun',           family: 'Sarabun',           gf: 'Sarabun:ital,wght@0,300;0,400;0,500;0,700;1,400' },
+  { id: 'krub',      name: 'Krub',              family: 'Krub',              gf: 'Krub:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400' },
+  { id: 'thasadith', name: 'Thasadith',         family: 'Thasadith',         gf: 'Thasadith:ital,wght@0,400;0,700;1,400' },
+  { id: 'playpen',   name: 'Playpen Sans Thai', family: 'Playpen Sans Thai', gf: 'Playpen+Sans+Thai:wght@300..700' },
+  { id: 'notoserif', name: 'Noto Serif Thai',   family: 'Noto Serif Thai',   gf: 'Noto+Serif+Thai:wght@400;500;700' },
+];
+const fontCssUrl = f => `https://fonts.googleapis.com/css2?family=${f.gf}&display=swap`;
+
+function applyFont(id) {
+  const f = FONTS.find(x => x.id === id) || FONTS[0];
+  if (f.family) {
+    loadAsset(fontCssUrl(f), true).catch(() => {});
+    document.documentElement.style.setProperty('--font-ui', `'${f.family}', ${FONT_FALLBACK}`);
+    localStorage.setItem('ebook:font', f.id);
+    // เก็บ family+css url แยกไว้ ให้หน้าอื่น (index/upload) bootstrap ได้โดยไม่ต้องรู้จักลิสต์นี้
+    localStorage.setItem('ebook:font:family', f.family);
+    localStorage.setItem('ebook:font:css', fontCssUrl(f));
+  } else {
+    document.documentElement.style.removeProperty('--font-ui');
+    localStorage.removeItem('ebook:font');
+    localStorage.removeItem('ebook:font:family');
+    localStorage.removeItem('ebook:font:css');
+  }
+  renderFontPop();
+}
+
+function renderFontPop() {
+  const cur = localStorage.getItem('ebook:font') || 'system';
+  $('fontPop').innerHTML = FONTS.map(f => `
+    <button type="button" data-id="${f.id}" class="${f.id === cur ? 'current' : ''}"
+      ${f.family ? `style="font-family:'${f.family}', sans-serif"` : ''}>
+      ${f.id === cur ? '✓ ' : ''}${f.name}</button>`).join('');
+}
+
+$('fontBtn').addEventListener('click', () => {
+  const pop = $('fontPop');
+  if (!pop.classList.contains('show')) {
+    renderFontPop();
+    // โหลดทุกฟอนต์ตอนเปิดเมนู เพื่อให้ตัวเลือกแต่ละอัน preview เป็นฟอนต์จริงของมัน
+    FONTS.filter(f => f.gf).forEach(f => loadAsset(fontCssUrl(f), true).catch(() => {}));
+  }
+  pop.classList.toggle('show');
+});
+$('fontPop').addEventListener('click', e => {
+  const b = e.target.closest('button[data-id]');
+  if (!b) return;
+  applyFont(b.dataset.id);
+  $('fontPop').classList.remove('show');
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('#fontPop, #fontBtn')) $('fontPop').classList.remove('show');
+});
 
 /* ---------- drawer ---------- */
 
