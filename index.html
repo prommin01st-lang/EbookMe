@@ -59,7 +59,7 @@
       <button class="tool-btn" id="viewBtn" type="button" title="สลับไปมุมมองตาราง">
         ▦<span class="tool-label"> ตาราง</span>
       </button>
-      <button class="tool-btn tool-icon" id="themeBtn" type="button" title="เปลี่ยนธีม">🌙</button>
+      <button class="tool-btn tool-icon" id="themeBtn" type="button" title="เปลี่ยนธีม (สว่าง / ซีเปีย / มืด)">🌙</button>
     </div>
   </header>
 
@@ -144,9 +144,12 @@
     </div>
     <div class="detail-controls">
       <div class="detail-buttons">
-        <button class="text-button primary" id="toggle-book" type="button" aria-pressed="false">อ่านแบบ 3D</button>
-        <a class="text-button" id="read-book" href="#">อ่านแบบ 2D</a>
+        <button class="text-button primary" id="toggle-book" type="button" aria-pressed="false">เริ่มอ่าน</button>
         <button class="text-button reset-button" id="reset-view" type="button">รีเซ็ตมุมมอง</button>
+      </div>
+      <div class="surface-switch" role="group" aria-label="รูปแบบการอ่าน">
+        <span class="surface-opt is-on" aria-current="true">📕 หนังสือ 3D</span>
+        <a class="surface-opt" id="read-book" href="#" title="อ่านบทเดียวกันในหน้าอ่านปกติ">📄 หน้าอ่าน 2D</a>
       </div>
       <p class="microcopy">ลากปกหรือแตะหนึ่งครั้งเพื่อเปิด · ลากพื้นหลังเพื่อหมุนดู</p>
     </div>
@@ -312,6 +315,8 @@ function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   localStorage.setItem('ebook:theme', t);
   themeButtons.forEach(b => { b.textContent = THEME_ICON[t]; });
+  // ฉาก 3D อบสีกระดาษไว้ในเท็กซ์เจอร์ ต้องบอกให้วาดใหม่ ไม่งั้นธีมเปลี่ยนแต่หนังสือไม่เปลี่ยน
+  window.dispatchEvent(new CustomEvent('ebook:theme', { detail: t }));
 }
 
 themeButtons.forEach(btn => btn.addEventListener('click', () => {

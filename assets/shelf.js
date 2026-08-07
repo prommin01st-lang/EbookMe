@@ -13,6 +13,18 @@ import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUnifo
    ปกทุกใบจึงต้องวาดสดด้วย canvas — ต้นฉบับฝังภาพปกมาเป็น atlas ซึ่งใช้กับ
    หนังสือที่เพิ่ม/ลบได้ตลอดเวลาไม่ได้ */
 
+/* กระดาษกับหมึกต้องมาจากธีมที่ผู้ใช้เลือก ไม่ใช่จากสีปกหนังสือ
+   เดิมหมึกคำนวณจากสีผ้าปก เล่มปกส้มเลยได้ตัวหนังสือสีส้มบนกระดาษครีม — อ่านแทบไม่ออก */
+const READING_THEMES = {
+  light: { paper: "#f7f2e8", wash: "255,255,255", grain: "92,76,55", ink: "#241f1a", exposure: 1.02, sheet: 0xf3ece0, room: 1.18 },
+  sepia: { paper: "#f0e2c6", wash: "255,248,228", grain: "120,96,58", ink: "#3b2f1c", exposure: 0.92, sheet: 0xeadcbe, room: 1.0 },
+  dark:  { paper: "#2b2823", wash: "180,172,158", grain: "12,10,8",  ink: "#ece5d8", exposure: 0.66, sheet: 0x2e2a25, room: 0.34 }
+};
+
+function readingTheme() {
+  return READING_THEMES[document.documentElement.dataset.theme] || READING_THEMES.sepia;
+}
+
 const SERIF = '"Noto Serif Thai", "Iowan Old Style", Baskerville, Georgia, serif';
 const SANS = '"Noto Sans Thai", Inter, "Helvetica Neue", Arial, sans-serif';
 
@@ -850,13 +862,14 @@ function makeEmbossMap(sourceTexture, name) {
 }
 
 function drawPaperSurface(ctx, width, height, random) {
-  ctx.fillStyle = "#e8e1d3";
+  const theme = readingTheme();
+  ctx.fillStyle = theme.paper;
   ctx.fillRect(0, 0, width, height);
 
   const paperWash = ctx.createLinearGradient(0, 0, width, height);
-  paperWash.addColorStop(0, "rgba(255,255,255,0.22)");
-  paperWash.addColorStop(0.42, "rgba(255,255,255,0.035)");
-  paperWash.addColorStop(1, "rgba(103,87,64,0.08)");
+  paperWash.addColorStop(0, `rgba(${theme.wash},0.22)`);
+  paperWash.addColorStop(0.42, `rgba(${theme.wash},0.035)`);
+  paperWash.addColorStop(1, `rgba(${theme.grain},0.08)`);
   ctx.fillStyle = paperWash;
   ctx.fillRect(0, 0, width, height);
 
@@ -866,8 +879,8 @@ function drawPaperSurface(ctx, width, height, random) {
     const length = 5 + random() * 34;
     const lightFiber = random() > 0.44;
     ctx.strokeStyle = lightFiber
-      ? `rgba(255,255,255,${0.025 + random() * 0.045})`
-      : `rgba(92,76,55,${0.018 + random() * 0.035})`;
+      ? `rgba(${theme.wash},${0.025 + random() * 0.045})`
+      : `rgba(${theme.grain},${0.018 + random() * 0.035})`;
     ctx.lineWidth = 0.45 + random() * 0.65;
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -1057,7 +1070,7 @@ function makeInteriorPageTexture(book, spec, folio) {
   const random = seededRandom(hashSeed(`${book.id}-leaf-${spec.kind}-${folio}`) + book.seed);
   drawPaperSurface(ctx, PAGE_W, PAGE_H, random);
 
-  const ink = `#${new THREE.Color(book.color).lerp(new THREE.Color(0x211b16), 0.62).getHexString()}`;
+  const ink = readingTheme().ink;
   ctx.fillStyle = ink;
   ctx.strokeStyle = ink;
   ctx.textAlign = "left";
@@ -1674,14 +1687,19 @@ function createBookRig(book, index) {
     sheenRoughness: 0.78,
     transparent: true
   });
+  // ฟอยล์เป็นวัสดุโลหะ ถ้าแสงไม่เข้ามุมชื่อเรื่องจะจมหายไปกับผ้าปก
+  // ใส่ค่าเรืองแสงอ่อน ๆ ให้อ่านออกทุกมุม โดยยังเห็นเป็นฟอยล์ปั๊มอยู่
+  const foilGlow = new THREE.Color(book.foil).multiplyScalar(0.22);
   const foilArt = new THREE.MeshPhysicalMaterial({
     color: book.foil,
     map: foilTexture,
     alphaMap: foilTexture,
     bumpMap: foilEmbossTexture,
     bumpScale: 0.016,
-    roughness: book.id === "cursor" ? 0.22 : 0.2,
-    metalness: book.id === "cursor" ? 0.34 : 0.94,
+    emissive: foilGlow,
+    emissiveMap: foilTexture,
+    roughness: 0.26,
+    metalness: 0.82,
     clearcoat: 0.18,
     clearcoatRoughness: 0.12,
     transparent: true,
@@ -2641,29 +2659,67 @@ function setThemeColorsImmediately() {
   themeMoving = false;
 }
 
+/* เปลี่ยนธีมแล้วต้องเห็นผลในฉาก 3D ด้วย ไม่ใช่เปลี่ยนแค่มุมมองตาราง
+   กระดาษถูกอบเป็นภาพไว้แล้ว จึงต้องวาดใหม่ทั้งชุด ไม่ใช่แค่เปลี่ยนค่าสีวัสดุ */
+function applyReadingTheme() {
+  const theme = readingTheme();
+  if (renderer) {
+    renderer.toneMappingExposure = theme.exposure;
+    renderer.shadowMap.needsUpdate = true;
+  }
+  shared.page.color.setHex(theme.sheet);
+  shared.pageSheet.color.setHex(theme.sheet);
+  shared.page.needsUpdate = true;
+  shared.pageSheet.needsUpdate = true;
+
+  // เท็กซ์เจอร์กระดาษที่แคชไว้ใช้สีธีมเดิม ต้องทิ้งให้สร้างใหม่
+  sharedPaperFaceTexture?.dispose();
+  sharedPaperFaceTexture = null;
+  if (sharedPageEdgeTextures) {
+    Object.values(sharedPageEdgeTextures).forEach((texture) => texture?.dispose());
+    sharedPageEdgeTextures = null;
+  }
+
+  if (BOOKS[selectedIndex]) applyBookTheme(BOOKS[selectedIndex]);
+  if (activeBook?.reading) renderReadingBatch(activeBook, activeBook.reading.batch);
+  requestFrame();
+}
+
 function applyBookTheme(book) {
   const palette = book.palette;
+  const theme = readingTheme();
+
+  /* ธีมหรี่/เร่งความสว่างของห้องทั้งห้อง สีผ้าปกยังเป็นของเล่มนั้นเหมือนเดิม
+     พอผนังเปลี่ยนความสว่าง สีตัวอักษรบน UI ต้องพลิกตาม ไม่งั้นธีมมืดจะได้
+     ตัวหนังสือเข้มบนพื้นเข้ม (เล่มปกมัสตาร์ดมีผนังสีอ่อนกับหมึกสีเข้ม) */
+  const roomPaper = new THREE.Color(palette.paper).multiplyScalar(theme.room);
+  const roomDeep = new THREE.Color(palette.paperDeep).multiplyScalar(theme.room);
+  const luminance = roomPaper.r * 0.299 + roomPaper.g * 0.587 + roomPaper.b * 0.114;
+  const uiInk = luminance > 0.42 ? "#1b1915" : "#f3ede3";
+  const uiInkSoft = luminance > 0.42 ? "#5b544a" : "#b3aea7";
+
   /* ตั้งเป็นตัวแปร --sh-* ไม่ใช่ --accent/--ink ตรง ๆ เพราะ inline style บน :root
      ชนะกฎธีมใน app.css เสมอ มุมมองตารางกับหน้าอ่านจะเพี้ยนสีตามเล่มที่เลือกอยู่ */
   const rootStyle = document.documentElement.style;
-  rootStyle.setProperty("--sh-paper", palette.paper);
-  rootStyle.setProperty("--sh-paper-deep", palette.paperDeep);
+  rootStyle.setProperty("--sh-paper", `#${roomPaper.getHexString()}`);
+  rootStyle.setProperty("--sh-paper-deep", `#${roomDeep.getHexString()}`);
   rootStyle.setProperty("--sh-paper-pale", palette.paperPale);
-  rootStyle.setProperty("--sh-ink", palette.ink);
-  rootStyle.setProperty("--sh-ink-soft", palette.inkSoft);
-  rootStyle.setProperty("--sh-rule", `color-mix(in srgb, ${palette.ink} 24%, transparent)`);
+  rootStyle.setProperty("--sh-ink", uiInk);
+  rootStyle.setProperty("--sh-ink-soft", uiInkSoft);
+  rootStyle.setProperty("--sh-rule", `color-mix(in srgb, ${uiInk} 24%, transparent)`);
   rootStyle.setProperty("--sh-accent", book.accent || book.foil);
 
-  themeTargets.floor.set(palette.paperDeep);
-  themeTargets.wall.set(palette.wall);
-  themeTargets.shelf.set(palette.shelf);
-  themeTargets.shelfDark.set(palette.shelfDark);
-  themeTargets.shadow.set(palette.shelfDark);
-  themeTargets.fog.set(palette.wall);
-  themeTargets.hemisphere.set(palette.paperPale);
-  themeTargets.hemisphereGround.set(palette.shelf);
-  themeTargets.key.set(palette.light);
-  themeTargets.fill.set(palette.fill);
+  const dim = theme.room;
+  themeTargets.floor.set(palette.paperDeep).multiplyScalar(dim);
+  themeTargets.wall.set(palette.wall).multiplyScalar(dim);
+  themeTargets.shelf.set(palette.shelf).multiplyScalar(dim);
+  themeTargets.shelfDark.set(palette.shelfDark).multiplyScalar(dim);
+  themeTargets.shadow.set(palette.shelfDark).multiplyScalar(dim);
+  themeTargets.fog.set(palette.wall).multiplyScalar(dim);
+  themeTargets.hemisphere.set(palette.paperPale).multiplyScalar(Math.min(1.1, dim));
+  themeTargets.hemisphereGround.set(palette.shelf).multiplyScalar(dim);
+  themeTargets.key.set(palette.light).multiplyScalar(Math.min(1.1, dim));
+  themeTargets.fill.set(palette.fill).multiplyScalar(Math.min(1.1, dim));
   themeTargets.rim.set(book.accent || book.foil);
 
   if (!themeInitialized || reducedMotion) {
@@ -2759,10 +2815,8 @@ function populateDetail(book) {
   detailFormat.textContent = book.theme;
   detailTheme.textContent = book.cloud ? "คลาวด์ ☁️" : "ในเครื่อง";
   detailMotif.textContent = book.binding;
-  if (readButton) {
-    readButton.href = readerUrl(book);
-    readButton.textContent = book.lastChapter ? `อ่านต่อ บทที่ ${book.lastChapter}` : "เริ่มอ่าน";
-  }
+  // ปุ่มนี้เป็น "สลับไปอ่านอีกแบบ" ไม่ใช่ "เริ่มอ่าน" — ชื่อจึงต้องบอกปลายทางให้ชัด
+  if (readButton) readButton.href = readerUrl(book);
 }
 
 function getSpreadLabels(book) {
@@ -2828,7 +2882,11 @@ function updatePageControls(announce = false) {
       ? `${pad(currentSpread + 1)} / ${pad(SPREAD_COUNT)}`
       : "แตะที่หนังสือเพื่อเปิด";
   }
-  toggleBookButton.textContent = readingOpen ? "ปิดเล่ม" : "พลิกดูข้างใน";
+  /* ปุ่มหลักต้อง "เริ่มอ่านตรงนี้" ไม่ใช่พาไปหน้าอื่น
+     ของเดิมปุ่มชื่อ "อ่านต่อ บทที่ N" แต่กดแล้วเด้งไปหน้า 2D ซึ่งขัดความคาดหวัง */
+  toggleBookButton.textContent = readingOpen
+    ? "ปิดเล่ม"
+    : (book.lastChapter ? `อ่านต่อ บทที่ ${book.lastChapter}` : "เริ่มอ่าน");
   toggleBookButton.setAttribute("aria-pressed", String(readingOpen));
   const onePageView = readingOpen && wantsOnePage();
   // ปุ่มสลับมีความหมายเฉพาะตอนที่ไม่ใช่จอกว้างแนวนอน (ซึ่งกางสองหน้าอยู่แล้ว)
@@ -3725,6 +3783,27 @@ function onWheel(event) {
 const PAGE_FACES = PAGINATED_LEAF_COUNT * 2;
 const readingCache = new Map();
 
+/* .md ที่ฝัง HTML ไว้ (callout, ตาราง, รูป) จะเหลือแท็กติดมาถ้าแปลงด้วย regex อย่างเดียว
+   เช็คจากเนื้อไฟล์ด้วย ไม่ใช่ดูแค่นามสกุล เพราะบทที่อัปโหลดเป็น .md อาจเป็น HTML ล้วน */
+function htmlToText(raw) {
+  const doc = new DOMParser().parseFromString(raw, "text/html");
+  doc.querySelectorAll("script, style, head, nav, template").forEach((el) => el.remove());
+  doc.querySelectorAll("pre, code").forEach((el) => {
+    el.textContent = "[ โค้ด — ดูในหน้าอ่าน 2D ]";
+  });
+  // ทำให้บล็อกกลายเป็นย่อหน้าจริง ไม่งั้น textContent จะติดกันเป็นพืดหมด
+  doc.querySelectorAll("p, div, li, h1, h2, h3, h4, h5, h6, tr, pre, blockquote, br, section, article")
+    .forEach((el) => el.append(document.createTextNode("\n\n")));
+  return (doc.body?.textContent || "").replace(/\n{3,}/g, "\n\n");
+}
+
+/* เชื่อนามสกุลไฟล์เป็นหลัก ดูเนื้อไฟล์เฉพาะตอนที่มันเป็นเอกสาร HTML เต็มใบจริง ๆ
+   บทที่สอน markdown มีตัวอย่างแท็ก HTML อยู่เต็มไปหมด ถ้าเดาจากแท็กจะตีความผิด
+   แล้วไปแปลงด้วย htmlToText ซึ่งไม่รู้จัก ## กับ > ทำให้เครื่องหมาย markdown โผล่บนกระดาษ */
+function looksLikeHtml(raw) {
+  return /^\s*(<!doctype html|<html[\s>])/i.test(raw.slice(0, 400));
+}
+
 function markdownToText(src) {
   return src
     .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")   // front matter
@@ -3732,11 +3811,24 @@ function markdownToText(src) {
     .replace(/^\s*\|.*\|\s*$/gm, "")                  // ตาราง
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "\n[ รูปภาพ ]\n")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/`([^`]*)`/g, "$1")
+    .replace(/`{1,3}[a-z]*\s*/gi, "")
+    // สูตรคณิตเป็นซอร์ส LaTeX ถ้าปล่อยไว้จะเห็นเป็น $\\frac{1}{n}$ กลางหน้ากระดาษ
+    .replace(/\$\$[\s\S]*?\$\$/g, " [ สูตรคณิต — ดูในหน้าอ่าน 2D ] ")
+    .replace(/\\\[[\s\S]*?\\\]/g, " [ สูตรคณิต — ดูในหน้าอ่าน 2D ] ")
+    .replace(/\\\([\s\S]*?\\\)/g, " [ สูตรคณิต ] ")
+    .replace(/\$(?!\d)[^$\n]{1,200}\$/g, " [ สูตรคณิต ] ")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/^\s{0,3}>\s?/gm, "")
-    .replace(/^\s*[-*+]\s+/gm, "· ")
+    // ทำให้แต่ละข้อในลิสต์เป็นย่อหน้าของตัวเอง ไม่งั้นมันไหลต่อกันเป็นพรืดอ่านไม่ออก
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "\n\n· ")
     .replace(/\*\*|__|~~|\*/g, "")
+    // แท็กที่ฝังมาในไฟล์ markdown ต้องหลุดออกไปด้วย ไม่งั้นขึ้นบนกระดาษเป็น <div ...>
+    // เจาะจงเฉพาะแท็ก HTML จริง ๆ ไม่งั้นข้อความอย่าง "a < b" โดนกินไปด้วย
+    .replace(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]{0,300})?\/?>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
     .replace(/\n{3,}/g, "\n\n");
 }
 
@@ -3749,9 +3841,8 @@ async function loadChapterText(book, chapterNo) {
     const res = await fetch(path);
     if (!res.ok) return null;
     const raw = await res.text();
-    const text = /\.md([?#].*)?$/i.test(path)
-      ? markdownToText(raw)
-      : new DOMParser().parseFromString(raw, "text/html").body?.textContent || "";
+    const isMarkdown = /\.md([?#].*)?$/i.test(path);
+    const text = isMarkdown && !looksLikeHtml(raw) ? markdownToText(raw) : htmlToText(raw);
     const paragraphs = text
       .split(/\n\s*\n/)
       .map((para) => para.replace(/\s+/g, " ").trim())
@@ -4290,6 +4381,7 @@ function frameOpenSpread(instant = false) {
   if (instant || reducedMotion) {
     camera.position.copy(framingPosition);
     controls.target.copy(framingTarget);
+    controls.enabled = true;
     controls.update();
     framingActive = false;
   } else {
@@ -4304,6 +4396,10 @@ function frameOpenSpread(instant = false) {
    ถ้ากล้องตัดภาพเลยจะเห็นเป็นการกระพริบ ไม่รู้ว่าย้ายไปทางไหน */
 function updateFraming(delta) {
   if (!framingActive) return false;
+  /* ระหว่างไถลต้องปิด OrbitControls ไว้ก่อน มันคำนวณตำแหน่งกล้องใหม่จาก target ทุกเฟรม
+     แล้วบีบระยะ/มุมตาม min-maxDistance ของมันเอง กล้องเลยไปไม่ถึงปลายทาง
+     หน้ากระดาษจึงเลื่อนมาแค่บางส่วนแล้วค้าง */
+  controls.enabled = false;
   const speed = 7.5;
   camera.position.x = damp(camera.position.x, framingPosition.x, speed, delta);
   camera.position.y = damp(camera.position.y, framingPosition.y, speed, delta);
@@ -4320,7 +4416,9 @@ function updateFraming(delta) {
     camera.position.copy(framingPosition);
     controls.target.copy(framingTarget);
     framingActive = false;
+    controls.enabled = true;
   }
+  camera.lookAt(controls.target);
   return true;
 }
 
@@ -4515,8 +4613,8 @@ function frame(time) {
         delta
       );
     }
-    updateFraming(delta);
-    controls.update();
+    // ไถลกล้องอยู่ = อย่าให้ controls.update() มาแก้ตำแหน่งซ้อน
+    if (!updateFraming(delta)) controls.update();
     updatePaginatedBook(activeBook, delta, getDetailOpenAmount());
   }
 
@@ -4783,7 +4881,10 @@ async function initialize() {
   controls.maxPolarAngle = Math.PI * 0.76;
   controls.target.copy(shelfCameraTarget);
   controls.addEventListener("change", requestFrame);
-  controls.addEventListener("start", () => { framingActive = false; });
+  controls.addEventListener("start", () => {
+    framingActive = false;
+    controls.enabled = true;
+  });
 
   RectAreaLightUniformsLib.init();
   addRoom();
@@ -4842,6 +4943,8 @@ async function initialize() {
   chapterNextButton?.addEventListener("click", () => goToChapter(1));
 
   applyWoodTexture();
+  applyReadingTheme();
+  window.addEventListener("ebook:theme", applyReadingTheme);
   renderer.render(scene, camera);
   loading.hidden = true;
   experience.classList.add("webgl-ready");

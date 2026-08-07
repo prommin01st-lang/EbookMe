@@ -683,6 +683,40 @@ a:focus-visible {
   gap: 10px;
 }
 
+/* สลับ "รูปแบบการอ่าน" ไม่ใช่ปุ่มสั่งงาน — ทำเป็นแท็บคู่ให้เห็นว่ากำลังอยู่แบบไหน
+   และอีกแบบคือทางเลือก ไม่ใช่ปุ่ม "เริ่มอ่าน" อีกอัน */
+.surface-switch {
+  display: inline-flex;
+  align-self: start;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--sh-ink) 28%, transparent);
+  border-radius: 999px;
+}
+
+.surface-opt {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--sh-ink) 72%, transparent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 180ms ease, background 180ms ease;
+}
+
+.surface-opt.is-on {
+  background: color-mix(in srgb, var(--sh-ink) 16%, transparent);
+  color: var(--sh-ink);
+}
+
+a.surface-opt:hover {
+  color: var(--sh-paper);
+  background: var(--sh-ink);
+}
+
 .detail-buttons .reset-button {
   min-height: 34px;
   padding: 0 14px;
@@ -886,6 +920,22 @@ body:not(.no-webgl) .fallback-note {
   .detail-panel.is-collapsed #reset-view,
   .detail-panel.is-collapsed .detail-controls .microcopy {
     display: none;
+  }
+
+  /* หุบแล้วยังต้องสลับไป 2D ได้ แต่ให้อยู่แถวเดียวกับปุ่มหลักเพื่อประหยัดที่ */
+  .detail-controls {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px 10px;
+  }
+
+  .surface-switch {
+    justify-self: end;
+  }
+
+  .surface-opt {
+    padding: 0 10px;
+    font-size: 0.68rem;
   }
 
   .detail-panel.is-collapsed .detail-title {
