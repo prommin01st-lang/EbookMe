@@ -4041,7 +4041,17 @@ function markdownToBlocks(src, baseUrl) {
       continue;
     }
 
-    if (/^\s*(?:---|\*\*\*|___)\s*$/.test(line)) { flushPara(); blocks.push({ kind: "rule" }); continue; }
+    /* บรรทัดขีดใต้ย่อหน้าคือ "หัวข้อแบบ setext" ตามสเปก markdown ไม่ใช่เส้นคั่น
+       (หน้าอ่าน 2D ใช้ marked ซึ่งตีความแบบนี้อยู่แล้ว 3D จึงต้องตรงกัน)
+       และเส้นคั่นยาวกว่าสามขีดก็ยังเป็นเส้นคั่น ของเดิมจับได้เฉพาะสามขีดพอดี */
+    const underline = line.match(/^\s{0,3}(=+|-{2,})\s*$/);
+    if (underline && para.length) {
+      const text = para.join(" ").replace(/\s+/g, " ").trim();
+      para = [];
+      if (text) blocks.push({ kind: "heading", level: underline[1][0] === "=" ? 1 : 2, runs: parseInline(text) });
+      continue;
+    }
+    if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { flushPara(); blocks.push({ kind: "rule" }); continue; }
 
     const heading = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
     if (heading) {
