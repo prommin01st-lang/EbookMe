@@ -1225,25 +1225,7 @@ function makeInteriorPageTexture(book, spec, folio) {
       drawWrappedCanvasText(ctx, spec.heading, M, 176, COL, size * 1.15, 2);
       y = 250;
     }
-    ctx.font = `400 21px ${SERIF}`;
-    spec.lines.forEach((line) => {
-      if (typeof line !== "string") {
-        // รูป/แผนภาพ: จัดกลางคอลัมน์ แล้วเลื่อน y ตามจำนวนบรรทัดที่จองไว้
-        try {
-          ctx.drawImage(line.figure, (PAGE_W - line.w) / 2, y - 12, line.w, line.h);
-        } catch {
-          ctx.globalAlpha = 0.6;
-          ctx.fillText("[ รูปภาพ — ดูในหน้าอ่าน 2D ]", M, y);
-        }
-        ctx.globalAlpha = 1;
-        y += line.rows * TEXT_LINE_H;
-        return;
-      }
-      ctx.globalAlpha = 0.86;
-      if (line) ctx.fillText(line, M, y);
-      ctx.globalAlpha = 1;
-      y += TEXT_LINE_H;
-    });
+    drawPageRows(ctx, spec.rows || [], y - 21, ink);
   } else if (spec.kind === "end") {
     drawEyebrow("จบบท", 146);
     ctx.font = `400 30px ${SERIF}`;
@@ -3888,12 +3870,21 @@ function onWheel(event) {
 const PAGE_FACES = PAGINATED_LEAF_COUNT * 2;
 const readingCache = new Map();
 
-/* เนื้อหาบทถูกแปลงเป็น "บล็อก" ไม่ใช่ข้อความล้วน เพราะรูปกับแผนภาพ mermaid
-   ต้องถูกวาดลงกระดาษจริง ไม่ใช่แทนที่ด้วยป้ายว่ามีรูปอยู่ตรงนี้
-   บล็อกมีสามชนิด: ข้อความ, รูป (ทั้งไฟล์ภาพและ mermaid ที่ถูก render เป็นภาพแล้ว), ป้ายแทนของที่วาดไม่ได้ */
+/* ---------- เนื้อหาบท → บล็อกที่มีรูปแบบ ----------
+   ต้นฉบับยัดทุกอย่างเป็นข้อความล้วนก้อนเดียว หัวข้อ ลิสต์ ตาราง โค้ด และกล่องหมายเหตุ
+   จึงกลายเป็นย่อหน้าเหมือนกันหมด หรือหายไปเลย ที่นี่แยกเป็นบล็อกแล้ววาดตามชนิด */
 
-const FIGURE_MAX_H = 430;   // ความสูงสูงสุดของรูปบนหน้ากระดาษ
+const MONO = 'ui-monospace, "SF Mono", "JetBrains Mono", Consolas, monospace';
+const FIGURE_MAX_H = 430;
 const FIGURE_GAP = 18;
+
+const CALLOUT_LABEL = {
+  note: "หมายเหตุ",
+  tip: "เคล็ดลับ",
+  important: "สำคัญ",
+  warning: "ข้อควรระวัง",
+  caution: "ระวัง"
+};
 
 function loadImageElement(src, crossOrigin) {
   return new Promise((resolve) => {
@@ -3906,13 +3897,11 @@ function loadImageElement(src, crossOrigin) {
   });
 }
 
-/* รูปข้ามโดเมนที่ไม่มีหัว CORS จะทำให้ canvas "เปื้อน" แล้ว WebGL จะปฏิเสธเท็กซ์เจอร์ทั้งใบ
-   จึงต้องขอแบบ anonymous ก่อน ถ้าเซิร์ฟเวอร์ไม่ยอมก็ยอมแพ้แล้วขึ้นป้ายแทน */
+/* รูปข้ามโดเมนที่ไม่มีหัว CORS ทำให้ canvas "เปื้อน" แล้ว WebGL ปฏิเสธเท็กซ์เจอร์ทั้งใบ
+   ผลคือทั้งหน้ากลายเป็นหน้าว่าง ไม่ใช่แค่รูปหาย จึงต้องขอแบบ anonymous ก่อน */
 async function loadFigureImage(src) {
   const sameOrigin = new URL(src, location.href).origin === location.origin;
-  const img = await loadImageElement(src, !sameOrigin);
-  if (img || sameOrigin) return img;
-  return null;
+  return loadImageElement(src, !sameOrigin);
 }
 
 let mermaidReady = null;
@@ -3930,7 +3919,7 @@ function ensureMermaid() {
       startOnLoad: false,
       theme: "neutral",
       securityLevel: "loose",
-      // ป้ายแบบ HTML อยู่ใน foreignObject ซึ่ง rasterize ลง canvas ไม่ได้ ต้องใช้ text ของ SVG
+      // ป้ายแบบ HTML อยู่ใน foreignObject ซึ่ง rasterize ลง canvas ไม่ได้
       flowchart: { htmlLabels: false },
       fontFamily: SANS
     });
@@ -3946,87 +3935,10 @@ async function renderMermaidFigure(code) {
     const mermaid = await ensureMermaid();
     mermaidSeq += 1;
     const { svg } = await mermaid.render(`shelf-mermaid-${mermaidSeq}`, code);
-    // data: URL ไม่ทำให้ canvas เปื้อน ต่างจากการโหลด SVG ข้ามโดเมน
-    return await loadImageElement(
-      `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
-      false
-    );
+    return await loadImageElement(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, false);
   } catch {
     return null;
   }
-}
-
-function textBlock(text) {
-  return { kind: "text", text: text.replace(/\s+/g, " ").trim() };
-}
-
-function markdownToBlocks(src, baseUrl) {
-  const blocks = [];
-  const lines = src
-    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")   // front matter
-    .split(/\r?\n/);
-
-  let buffer = [];
-  const flush = () => {
-    const text = cleanMarkdownText(buffer.join("\n"));
-    text.split(/\n\s*\n/).forEach((para) => {
-      const t = para.replace(/\s+/g, " ").trim();
-      if (t) blocks.push({ kind: "text", text: t });
-    });
-    buffer = [];
-  };
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const fence = line.match(/^\s*```+\s*([a-zA-Z0-9_-]*)/);
-    if (fence) {
-      flush();
-      const lang = (fence[1] || "").toLowerCase();
-      const body = [];
-      i += 1;
-      while (i < lines.length && !/^\s*```/.test(lines[i])) {
-        body.push(lines[i]);
-        i += 1;
-      }
-      if (lang === "mermaid") blocks.push({ kind: "mermaid", code: body.join("\n") });
-      else blocks.push({ kind: "note", text: "[ โค้ด — ดูในหน้าอ่าน 2D ]" });
-      continue;
-    }
-
-    // รูปที่อยู่บรรทัดเดียวโดด ๆ ถือเป็นบล็อกรูป
-    const solo = line.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)[^)]*\)\s*$/);
-    if (solo) {
-      flush();
-      blocks.push({ kind: "image", src: absoluteUrl(solo[2], baseUrl), alt: solo[1] });
-      continue;
-    }
-
-    buffer.push(line);
-  }
-  flush();
-  return blocks;
-}
-
-function cleanMarkdownText(src) {
-  return src
-    .replace(/^\s*\|.*\|\s*$/gm, "")                  // ตาราง
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")             // รูปที่แทรกกลางย่อหน้า
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/`{1,3}[a-z]*\s*/gi, "")
-    .replace(/\$\$[\s\S]*?\$\$/g, " [ สูตรคณิต — ดูในหน้าอ่าน 2D ] ")
-    .replace(/\\\[[\s\S]*?\\\]/g, " [ สูตรคณิต — ดูในหน้าอ่าน 2D ] ")
-    .replace(/\\\([\s\S]*?\\\)/g, " [ สูตรคณิต ] ")
-    .replace(/\$(?!\d)[^$\n]{1,200}\$/g, " [ สูตรคณิต ] ")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/^\s{0,3}>\s?/gm, "")
-    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "\n\n· ")
-    .replace(/\*\*|__|~~|\*/g, "")
-    .replace(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]{0,300})?\/?>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\n{3,}/g, "\n\n");
 }
 
 function absoluteUrl(src, baseUrl) {
@@ -4037,58 +3949,210 @@ function absoluteUrl(src, baseUrl) {
   }
 }
 
+/* ---------- ข้อความในบรรทัด ----------
+   คืนค่าเป็น "run" ที่มีสไตล์ติดมาด้วย เพื่อให้ตัวหนากับโค้ดในบรรทัดยังเห็นต่างกัน
+   (ของเดิม regex กิน `inline code` หายไปทั้งคำ) */
+function parseInline(src) {
+  const runs = [];
+  let rest = String(src ?? "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_, m) => `${m.trim()}`)
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => `${m.trim()}`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, m) => `${m.trim()}`)
+    .replace(/\$(?!\d)([^$\n]{1,200})\$/g, (_, m) => `${m.trim()}`)
+    .replace(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]{0,300})?\/?>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+
+  const re = /`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|([^]*)/;
+  let m = re.exec(rest);
+  while (m) {
+    if (m.index > 0) runs.push({ s: rest.slice(0, m.index), style: "" });
+    if (m[1] !== undefined) runs.push({ s: m[1], style: "code" });
+    else if (m[2] !== undefined) runs.push({ s: m[2], style: "bold" });
+    else if (m[3] !== undefined) runs.push({ s: m[3], style: "bold" });
+    else if (m[4] !== undefined) runs.push({ s: m[4], style: "italic" });
+    else runs.push({ s: m[5], style: "math" });
+    rest = rest.slice(m.index + m[0].length);
+    m = re.exec(rest);
+  }
+  if (rest) runs.push({ s: rest, style: "" });
+  return runs.filter((r) => r.s !== "");
+}
+
+function runsText(runs) {
+  return runs.map((r) => r.s).join("");
+}
+
+/* ---------- markdown → บล็อก ---------- */
+
+function markdownToBlocks(src, baseUrl) {
+  const lines = src.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "").split(/\r?\n/);
+  const blocks = [];
+  let para = [];
+
+  const flushPara = () => {
+    const text = para.join(" ").replace(/\s+/g, " ").trim();
+    if (text) blocks.push({ kind: "para", runs: parseInline(text) });
+    para = [];
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    const fence = line.match(/^\s*```+\s*([a-zA-Z0-9_-]*)/);
+    if (fence) {
+      flushPara();
+      const body = [];
+      i += 1;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) { body.push(lines[i]); i += 1; }
+      const lang = (fence[1] || "").toLowerCase();
+      if (lang === "mermaid") blocks.push({ kind: "mermaid", code: body.join("\n") });
+      else blocks.push({ kind: "code", lang, lines: body });
+      continue;
+    }
+
+    if (/^\s*(?:---|\*\*\*|___)\s*$/.test(line)) { flushPara(); blocks.push({ kind: "rule" }); continue; }
+
+    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flushPara();
+      blocks.push({ kind: "heading", level: Math.min(3, heading[1].length), runs: parseInline(heading[2]) });
+      continue;
+    }
+
+    const solo = line.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)[^)]*\)\s*$/);
+    if (solo) {
+      flushPara();
+      blocks.push({ kind: "image", src: absoluteUrl(solo[2], baseUrl), alt: solo[1] });
+      continue;
+    }
+
+    // ตาราง: หัวตาราง + เส้นคั่น + แถวข้อมูล
+    if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] || "")) {
+      flushPara();
+      const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      const rows = [];
+      i += 2;
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(cells(lines[i])); i += 1; }
+      i -= 1;
+      blocks.push({ kind: "table", head, rows });
+      continue;
+    }
+
+    if (/^\s*>/.test(line)) {
+      flushPara();
+      const quoted = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) { quoted.push(lines[i].replace(/^\s*>\s?/, "")); i += 1; }
+      i -= 1;
+      let tone = null;
+      const tag = quoted[0]?.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$/i);
+      if (tag) { tone = tag[1].toLowerCase(); quoted.shift(); }
+      const text = quoted.join(" ").replace(/\s+/g, " ").trim();
+      if (text || tone) blocks.push({ kind: "quote", tone, runs: parseInline(text) });
+      continue;
+    }
+
+    const item = line.match(/^(\s*)(?:([-*+])|(\d+)[.)])\s+(.*)$/);
+    if (item) {
+      flushPara();
+      const depth = Math.min(2, Math.floor(item[1].length / 2));
+      const marker = item[2] ? "·" : `${item[3]}.`;
+      blocks.push({ kind: "item", depth, marker, runs: parseInline(item[4]) });
+      continue;
+    }
+
+    if (!line.trim()) { flushPara(); continue; }
+    para.push(line);
+  }
+  flushPara();
+  return blocks;
+}
+
+/* ---------- HTML → บล็อก ---------- */
+
+const CALLOUT_CLASS = /(^|\s)(note|tip|warning|important|caution)(\s|$)/;
+
 function htmlToBlocks(raw, baseUrl) {
   const doc = new DOMParser().parseFromString(raw, "text/html");
   doc.querySelectorAll("script, style, head, nav, template").forEach((el) => el.remove());
-
   const blocks = [];
-  let buffer = "";
-  const flushText = () => {
-    const t = buffer.replace(/\s+/g, " ").trim();
-    if (t) blocks.push({ kind: "text", text: t });
-    buffer = "";
+
+  const pushText = (el, kind, extra) => {
+    const runs = parseInline((el.textContent || "").replace(/\s+/g, " ").trim());
+    if (runs.length) blocks.push({ kind, runs, ...extra });
   };
 
-  const walk = (node) => {
+  const walk = (node, depth) => {
     node.childNodes.forEach((child) => {
       if (child.nodeType === Node.TEXT_NODE) {
-        buffer += child.textContent;
+        const t = child.textContent.replace(/\s+/g, " ").trim();
+        if (t) blocks.push({ kind: "para", runs: parseInline(t) });
         return;
       }
       if (child.nodeType !== Node.ELEMENT_NODE) return;
       const tag = child.tagName.toLowerCase();
+      const cls = child.getAttribute("class") || "";
 
       if (tag === "img") {
-        flushText();
         const src = child.getAttribute("src");
         if (src) blocks.push({ kind: "image", src: absoluteUrl(src, baseUrl), alt: child.getAttribute("alt") || "" });
         return;
       }
-      if (tag === "pre" || tag === "code") {
-        const cls = child.getAttribute("class") || "";
-        const isMermaid = /(^|\s)(mermaid|language-mermaid)(\s|$)/.test(cls);
-        flushText();
-        if (isMermaid) blocks.push({ kind: "mermaid", code: child.textContent || "" });
-        else if (tag === "pre") blocks.push({ kind: "note", text: "[ โค้ด — ดูในหน้าอ่าน 2D ]" });
-        else buffer += child.textContent;
+      if (tag === "hr") { blocks.push({ kind: "rule" }); return; }
+      if (/^h[1-6]$/.test(tag)) {
+        pushText(child, "heading", { level: Math.min(3, Number(tag[1])) });
         return;
       }
-      if (/^(p|div|section|article|li|h[1-6]|blockquote|tr|figure|figcaption)$/.test(tag)) {
-        walk(child);
-        flushText();
+      if (tag === "pre") {
+        if (/(^|\s)(mermaid|language-mermaid)(\s|$)/.test(cls) || /(^|\s)language-mermaid(\s|$)/.test(child.querySelector("code")?.getAttribute("class") || "")) {
+          blocks.push({ kind: "mermaid", code: child.textContent || "" });
+        } else {
+          blocks.push({ kind: "code", lang: "", lines: (child.textContent || "").replace(/\n$/, "").split("\n") });
+        }
         return;
       }
-      if (tag === "br") {
-        flushText();
+      if (tag === "table") {
+        const rowCells = (tr) => [...tr.children].map((td) => (td.textContent || "").replace(/\s+/g, " ").trim());
+        const rows = [...child.querySelectorAll("tr")].map(rowCells).filter((r) => r.length);
+        if (rows.length) blocks.push({ kind: "table", head: rows[0], rows: rows.slice(1) });
         return;
       }
-      walk(child);
+      if (tag === "li") { pushText(child, "item", { depth, marker: "·" }); return; }
+      if (tag === "ul" || tag === "ol") { walk(child, Math.min(2, depth + 1)); return; }
+      if (tag === "blockquote" || (tag === "div" && CALLOUT_CLASS.test(cls))) {
+        const tone = (cls.match(CALLOUT_CLASS) || [])[2] || null;
+        pushText(child, "quote", { tone });
+        return;
+      }
+      if (/^(p|div|section|article|figure|figcaption|main|header|footer|td|th|tr|span|em|strong|code|a|b|i|small)$/.test(tag)) {
+        if (/^(span|em|strong|code|a|b|i|small)$/.test(tag)) {
+          const t = (child.textContent || "").replace(/\s+/g, " ").trim();
+          if (t) blocks.push({ kind: "para", runs: parseInline(t) });
+          return;
+        }
+        walk(child, depth);
+        return;
+      }
+      walk(child, depth);
     });
   };
 
-  walk(doc.body || doc);
-  flushText();
-  return blocks;
+  walk(doc.body || doc, 0);
+
+  // ย่อหน้าสั้น ๆ ที่ติดกันจาก inline element ให้รวมกลับเป็นย่อหน้าเดียว
+  const merged = [];
+  blocks.forEach((b) => {
+    const last = merged[merged.length - 1];
+    if (b.kind === "para" && last && last.kind === "para" && runsText(last.runs).length < 90) {
+      last.runs = [...last.runs, { s: " ", style: "" }, ...b.runs];
+    } else merged.push(b);
+  });
+  return merged;
 }
 
 function looksLikeHtml(raw) {
@@ -4114,86 +4178,331 @@ async function loadChapterText(book, chapterNo) {
        ถ้าปล่อยเป็น async ระหว่างวาด จะไม่รู้ว่าต้องกันที่ให้รูปสูงเท่าไร */
     await Promise.all(blocks.map(async (block) => {
       if (block.kind === "image") block.img = await loadFigureImage(block.src);
-      else if (block.kind === "mermaid") block.img = await renderMermaidFigure(block.code);
-      if (block.kind === "mermaid") block.vector = true;   // SVG ขยายได้ไม่เสียความคม
+      else if (block.kind === "mermaid") { block.img = await renderMermaidFigure(block.code); block.vector = true; }
       if ((block.kind === "image" || block.kind === "mermaid") && !block.img) {
         const wasMermaid = block.kind === "mermaid";
-        block.kind = "note";
-        block.text = wasMermaid
-          ? "[ แผนภาพ — ดูในหน้าอ่าน 2D ]"
-          : `[ รูปภาพ${block.alt ? ` — ${block.alt}` : ""} ]`;
+        block.kind = "quote";
+        block.tone = "note";
+        block.runs = parseInline(wasMermaid
+          ? "แผนภาพนี้วาดในหนังสือไม่ได้ — เปิดในหน้าอ่าน 2D"
+          : `รูปนี้โหลดมาวาดไม่ได้${block.alt ? ` (${block.alt})` : ""} — เปิดในหน้าอ่าน 2D`);
       }
     }));
 
-    const usable = blocks.filter((b) => (b.kind === "text" || b.kind === "note") ? b.text : true);
-    return usable.length ? usable : null;
+    return blocks.length ? blocks : null;
   })().catch(() => null);
   readingCache.set(key, job);
   return job;
 }
 
-/* ขนาดที่รูปจะถูกวาดบนหน้ากระดาษ
-   ให้กว้างกว่าคอลัมน์ข้อความได้ (กินเข้าไปในขอบกระดาษ) เพราะแผนภาพแนวนอน
-   ถ้าย่อลงเท่าความกว้างคอลัมน์แล้วตัวหนังสือข้างในจะเล็กจนอ่านไม่ออก
-   mermaid เป็น SVG จึงขยายเกินขนาดจริงได้โดยไม่แตก ส่วนไฟล์ภาพห้ามขยาย */
+/* ---------- จัดหน้า ----------
+   ทุกบล็อกถูกแปลงเป็น "แถว" ที่รู้ความสูงและวาดตัวเองได้ การจัดหน้าจึงเป็นแค่การหยิบแถว
+   ใส่หน้าจนเต็ม แถวที่มีกรอบ (โค้ด/กล่องหมายเหตุ) จะจำกลุ่มไว้ เพื่อวาดพื้นหลังคลุมเฉพาะ
+   ส่วนที่ตกอยู่บนหน้านั้น — โค้ดยาวข้ามหน้าจึงยังมีกรอบต่อเนื่องทั้งสองหน้า */
+
+const STYLE = {
+  body: { size: 21, lh: 30, font: (s) => `400 ${s}px ${SERIF}` },
+  h1: { size: 31, lh: 40, before: 20, after: 10 },
+  h2: { size: 26, lh: 34, before: 18, after: 8 },
+  h3: { size: 22, lh: 30, before: 14, after: 6 },
+  code: { size: 15, lh: 22, pad: 12 },
+  table: { size: 15, lh: 21, pad: 8 },
+  gap: 14
+};
+
+let measureCanvas = null;
+
+function measureContext() {
+  if (!measureCanvas) measureCanvas = document.createElement("canvas").getContext("2d");
+  return measureCanvas;
+}
+
+function fontFor(style, size, weight) {
+  if (style === "code") return `${size - 3}px ${MONO}`;
+  if (style === "bold") return `700 ${size}px ${SERIF}`;
+  if (style === "italic") return `italic ${size}px ${SERIF}`;
+  if (style === "math") return `italic ${size - 1}px ${MONO}`;
+  return `${weight || 400} ${size}px ${SERIF}`;
+}
+
+// ตัดบรรทัดโดยยังคงสไตล์ของแต่ละชิ้นไว้ (ต่างจาก wrapToWidth ที่รับข้อความล้วน)
+function wrapRuns(runs, maxWidth, size, weight) {
+  const ctx = measureContext();
+  const lines = [];
+  let line = [];
+  let width = 0;
+
+  runs.forEach((run) => {
+    const font = fontFor(run.style, size, weight);
+    ctx.font = font;
+    segmentText(run.s).forEach((piece) => {
+      const w = ctx.measureText(piece).width;
+      if (width + w > maxWidth && line.length && piece.trim()) {
+        lines.push(line);
+        line = [];
+        width = 0;
+      }
+      if (!line.length && !piece.trim()) return;
+      line.push({ s: piece, font, w });
+      width += w;
+    });
+  });
+  if (line.length) lines.push(line);
+  return lines.length ? lines : [[]];
+}
+
+function drawRunLine(ctx, pieces, x, y) {
+  let cursor = x;
+  pieces.forEach((piece) => {
+    ctx.font = piece.font;
+    ctx.fillText(piece.s, cursor, y);
+    cursor += piece.w;
+  });
+}
+
 function figureBox(img, vector) {
   const maxWidth = PAGE_W - 36;
   const limit = vector ? 4 : 1;
   const scale = Math.min(maxWidth / img.naturalWidth, FIGURE_MAX_H / img.naturalHeight, limit);
-  return {
-    w: Math.round(img.naturalWidth * scale),
-    h: Math.round(img.naturalHeight * scale)
-  };
+  return { w: Math.round(img.naturalWidth * scale), h: Math.round(img.naturalHeight * scale) };
 }
 
-// ตัดบล็อกทั้งบทเป็นหน้า ๆ — บรรทัดข้อความเป็น string ส่วนรูปเป็นอ็อบเจกต์ที่จองความสูงไว้
-function paginateChapter(blocks, chapterNo, chapterTitle) {
-  const ctx = document.createElement("canvas").getContext("2d");
-  ctx.font = `400 21px ${SERIF}`;
+let groupSeq = 0;
 
-  const stream = [];
-  blocks.forEach((block) => {
-    if (block.kind === "image" || block.kind === "mermaid") {
-      const box = figureBox(block.img, block.vector);
-      stream.push({ figure: block.img, w: box.w, h: box.h, rows: Math.ceil((box.h + FIGURE_GAP) / TEXT_LINE_H) });
-      stream.push("");
-      return;
+// บล็อกหนึ่งอัน → แถวหลายแถว
+function blockRows(block) {
+  const M = PAGE_M;
+  const COL = PAGE_COL;
+  const rows = [];
+  const push = (h, draw, group) => rows.push({ h, draw, group });
+
+  if (block.kind === "heading") {
+    const st = block.level === 1 ? STYLE.h1 : block.level === 2 ? STYLE.h2 : STYLE.h3;
+    push(st.before, null);
+    wrapRuns(block.runs, COL, st.size, 600).forEach((pieces) => {
+      push(st.lh, (ctx, y) => { ctx.globalAlpha = 1; drawRunLine(ctx, pieces, M, y + st.size * 0.78); });
+    });
+    push(st.after, null);
+    return rows;
+  }
+
+  if (block.kind === "para") {
+    wrapRuns(block.runs, COL, STYLE.body.size).forEach((pieces) => {
+      push(STYLE.body.lh, (ctx, y) => { ctx.globalAlpha = 0.88; drawRunLine(ctx, pieces, M, y + 21); });
+    });
+    push(STYLE.gap, null);
+    return rows;
+  }
+
+  if (block.kind === "item") {
+    const indent = 24 + block.depth * 22;
+    const lines = wrapRuns(block.runs, COL - indent, STYLE.body.size);
+    lines.forEach((pieces, index) => {
+      push(STYLE.body.lh, (ctx, y) => {
+        ctx.globalAlpha = 0.88;
+        if (index === 0) {
+          ctx.font = `500 17px ${SANS}`;
+          ctx.fillText(block.marker, M + block.depth * 22, y + 20);
+        }
+        drawRunLine(ctx, pieces, M + indent, y + 21);
+      });
+    });
+    push(6, null);
+    return rows;
+  }
+
+  if (block.kind === "quote") {
+    groupSeq += 1;
+    const group = { id: groupSeq, deco: "quote", tone: block.tone };
+    const indent = 22;
+    push(STYLE.code.pad, null, group);
+    if (block.tone) {
+      push(24, (ctx, y) => {
+        ctx.globalAlpha = 0.95;
+        ctx.font = `600 13px ${SANS}`;
+        ctx.fillText(CALLOUT_LABEL[block.tone] || block.tone, M + indent, y + 15);
+      }, group);
     }
-    wrapToWidth(ctx, block.text, PAGE_COL, 400).forEach((line) => stream.push(line));
-    stream.push("");
-  });
-  while (stream.length && stream[stream.length - 1] === "") stream.pop();
+    wrapRuns(block.runs, COL - indent - 12, STYLE.body.size - 2).forEach((pieces) => {
+      push(27, (ctx, y) => { ctx.globalAlpha = 0.85; drawRunLine(ctx, pieces, M + indent, y + 19); }, group);
+    });
+    push(STYLE.code.pad, null, group);
+    push(STYLE.gap, null);
+    return rows;
+  }
 
-  const firstPageLines = Math.floor((TEXT_BOTTOM - 250) / TEXT_LINE_H);
-  const fullPageLines = Math.floor((TEXT_BOTTOM - TEXT_TOP) / TEXT_LINE_H);
+  if (block.kind === "code") {
+    groupSeq += 1;
+    const group = { id: groupSeq, deco: "code" };
+    const ctx = measureContext();
+    ctx.font = `${STYLE.code.size}px ${MONO}`;
+    const inner = COL - 24;
+    const wrapped = [];
+    block.lines.forEach((line) => {
+      let rest = line.replace(/\t/g, "  ");
+      if (!rest.trim()) { wrapped.push(""); return; }
+      while (rest.length) {
+        let cut = rest.length;
+        while (cut > 1 && ctx.measureText(rest.slice(0, cut)).width > inner) cut -= 1;
+        wrapped.push(rest.slice(0, cut));
+        rest = rest.slice(cut);
+      }
+    });
+    push(STYLE.code.pad, null, group);
+    wrapped.forEach((text) => {
+      push(STYLE.code.lh, (c, y) => {
+        c.globalAlpha = 0.82;
+        c.font = `${STYLE.code.size}px ${MONO}`;
+        c.fillText(text, M + 12, y + 15);
+      }, group);
+    });
+    push(STYLE.code.pad, null, group);
+    push(STYLE.gap, null);
+    return rows;
+  }
+
+  if (block.kind === "table") {
+    const ctx = measureContext();
+    ctx.font = `${STYLE.table.size}px ${SANS}`;
+    const all = [block.head, ...block.rows];
+    const columns = block.head.length || 1;
+    const raw = block.head.map((_, index) =>
+      Math.max(...all.map((row) => ctx.measureText(row[index] || "").width)));
+    const total = raw.reduce((sum, w) => sum + w, 0) || 1;
+    const widths = raw.map((w) => Math.max(56, (w / total) * (PAGE_COL - columns * 12)));
+    const scale = PAGE_COL / (widths.reduce((s, w) => s + w, 0) + columns * 12);
+    const finalWidths = widths.map((w) => w * scale);
+
+    const drawRow = (row, head) => {
+      const cells = row.map((text, index) =>
+        wrapToWidth(Object.assign(ctx, { font: `${head ? 600 : 400} ${STYLE.table.size}px ${SANS}` }), text, finalWidths[index] - 6, 3));
+      const height = Math.max(...cells.map((c) => c.length)) * STYLE.table.lh + STYLE.table.pad * 2;
+      push(height, (c, y) => {
+        c.globalAlpha = head ? 0.14 : 0.05;
+        c.fillRect(PAGE_M, y, PAGE_COL, height);
+        c.globalAlpha = head ? 1 : 0.85;
+        c.font = `${head ? 600 : 400} ${STYLE.table.size}px ${SANS}`;
+        let x = PAGE_M + 6;
+        cells.forEach((lines, index) => {
+          lines.forEach((line, li) => c.fillText(line, x, y + STYLE.table.pad + 15 + li * STYLE.table.lh));
+          x += finalWidths[index];
+        });
+        c.globalAlpha = 0.25;
+        c.fillRect(PAGE_M, y + height - 1, PAGE_COL, 1);
+      });
+    };
+    drawRow(block.head, true);
+    block.rows.forEach((row) => drawRow(row, false));
+    push(STYLE.gap, null);
+    return rows;
+  }
+
+  if (block.kind === "rule") {
+    push(28, (ctx, y) => {
+      ctx.globalAlpha = 0.28;
+      ctx.fillRect(PAGE_M + PAGE_COL * 0.3, y + 14, PAGE_COL * 0.4, 1);
+    });
+    return rows;
+  }
+
+  if (block.kind === "image" || block.kind === "mermaid") {
+    const box = figureBox(block.img, block.vector);
+    push(box.h + FIGURE_GAP, (ctx, y) => {
+      ctx.globalAlpha = 1;
+      try {
+        ctx.drawImage(block.img, (PAGE_W - box.w) / 2, y + FIGURE_GAP / 2, box.w, box.h);
+      } catch {
+        ctx.globalAlpha = 0.6;
+        ctx.fillText("[ รูปภาพ — ดูในหน้าอ่าน 2D ]", PAGE_M, y + 20);
+      }
+    });
+    push(STYLE.gap, null);
+    return rows;
+  }
+
+  return rows;
+}
+
+// วาดกรอบของกลุ่ม (โค้ด/กล่องหมายเหตุ) เฉพาะช่วงที่อยู่บนหน้านี้
+function drawGroupDecor(ctx, group, top, bottom, ink) {
+  ctx.save();
+  if (group.deco === "code") {
+    ctx.globalAlpha = 0.07;
+    ctx.fillStyle = ink;
+    ctx.fillRect(PAGE_M, top, PAGE_COL, bottom - top);
+    ctx.globalAlpha = 0.3;
+    ctx.fillRect(PAGE_M, top, 3, bottom - top);
+  } else if (group.deco === "quote") {
+    ctx.globalAlpha = group.tone ? 0.06 : 0.04;
+    ctx.fillStyle = ink;
+    ctx.fillRect(PAGE_M, top, PAGE_COL, bottom - top);
+    ctx.globalAlpha = group.tone === "warning" || group.tone === "caution" ? 0.55 : 0.35;
+    ctx.fillRect(PAGE_M, top, 4, bottom - top);
+  }
+  ctx.restore();
+}
+
+function paginateChapter(blocks, chapterNo, chapterTitle) {
+  const rows = [];
+  blocks.forEach((block) => rows.push(...blockRows(block)));
+
+  const firstBudget = TEXT_BOTTOM - 250;
+  const fullBudget = TEXT_BOTTOM - TEXT_TOP;
   const pages = [];
   let cursor = 0;
-  while (cursor < stream.length) {
+
+  while (cursor < rows.length) {
     const first = pages.length === 0;
-    const budget = first ? firstPageLines : fullPageLines;
-    const lines = [];
+    const budget = first ? firstBudget : fullBudget;
+    const slice = [];
     let used = 0;
-    while (cursor < stream.length) {
-      const item = stream[cursor];
-      const rows = typeof item === "string" ? 1 : item.rows;
-      // รูปที่สูงเกินหน้าที่เหลือ ให้ยกไปขึ้นหน้าใหม่ทั้งใบ ไม่ตัดครึ่ง
-      if (used + rows > budget) {
-        if (!lines.length && rows > budget) { lines.push(item); cursor += 1; }
+    while (cursor < rows.length) {
+      const row = rows[cursor];
+      if (used + row.h > budget) {
+        if (!slice.length) { slice.push(row); cursor += 1; }   // แถวเดียวสูงเกินหน้า ยอมให้ล้น
         break;
       }
-      lines.push(item);
-      used += rows;
+      slice.push(row);
+      used += row.h;
       cursor += 1;
     }
+    // อย่าให้หน้าขึ้นต้นด้วยช่องว่างเปล่า ๆ
+    while (slice.length && !slice[0].draw && !slice[0].group) slice.shift();
     pages.push({
       kind: "text",
       chapterNo,
       heading: first ? chapterTitle : null,
       runningHead: `บทที่ ${pad(chapterNo)}`,
-      lines
+      rows: slice
     });
   }
-  return pages.length ? pages : [{ kind: "text", chapterNo, heading: chapterTitle, lines: [] }];
+  return pages.length ? pages : [{ kind: "text", chapterNo, heading: chapterTitle, rows: [] }];
+}
+
+// วาดแถวทั้งหมดของหน้า พร้อมกรอบของกลุ่มที่คร่อมอยู่
+function drawPageRows(ctx, rows, startY, ink) {
+  let y = startY;
+  let run = null;
+  const flushRun = () => {
+    if (run) drawGroupDecor(ctx, run.group, run.top, run.bottom, ink);
+    run = null;
+  };
+  // วาดพื้นหลังกลุ่มก่อน แล้วค่อยวาดตัวหนังสือทับ
+  let probe = startY;
+  rows.forEach((row) => {
+    if (row.group) {
+      if (run && run.group.id === row.group.id) run.bottom = probe + row.h;
+      else { flushRun(); run = { group: row.group, top: probe, bottom: probe + row.h }; }
+    } else flushRun();
+    probe += row.h;
+  });
+  flushRun();
+
+  rows.forEach((row) => {
+    if (row.draw) row.draw(ctx, y);
+    y += row.h;
+  });
+  ctx.globalAlpha = 1;
 }
 
 function buildReadingSpecs(book, chapterNo, pages) {
