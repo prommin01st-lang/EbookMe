@@ -137,10 +137,19 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
       </button>
     </div>
+    <label class="chapter-pick">
+      <span class="sr-only">เลือกบทที่จะอ่าน</span>
+      <select id="chapter-select" aria-label="เลือกบทที่จะอ่าน"></select>
+    </label>
     <div class="chapter-nav">
       <button class="text-button reset-button" id="chapter-prev" type="button" disabled>‹ บทก่อนหน้า</button>
       <button class="text-button reset-button" id="spread-mode" type="button" hidden>▭▭ หน้าคู่</button>
       <button class="text-button reset-button" id="chapter-next" type="button" disabled>บทถัดไป ›</button>
+    </div>
+    <div class="type-nav" role="group" aria-label="ขนาดตัวอักษร">
+      <button class="text-button reset-button" id="font-down" type="button" aria-label="ลดขนาดตัวอักษร">A−</button>
+      <span id="font-size" aria-live="polite">17</span>
+      <button class="text-button reset-button" id="font-up" type="button" aria-label="เพิ่มขนาดตัวอักษร">A+</button>
     </div>
     <div class="detail-controls">
       <div class="detail-buttons">

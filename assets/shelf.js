@@ -272,6 +272,10 @@ const readButton = document.querySelector("#read-book");
 const chapterPrevButton = document.querySelector("#chapter-prev");
 const chapterNextButton = document.querySelector("#chapter-next");
 const panelToggle = document.querySelector("#panel-toggle");
+const chapterSelect = document.querySelector("#chapter-select");
+const fontDownButton = document.querySelector("#font-down");
+const fontUpButton = document.querySelector("#font-up");
+const fontSizeLabel = document.querySelector("#font-size");
 const spreadModeButton = document.querySelector("#spread-mode");
 const previousPageButton = document.querySelector("#previous-page");
 const nextPageButton = document.querySelector("#next-page");
@@ -2885,6 +2889,7 @@ function populateDetail(book) {
   detailMotif.textContent = book.binding;
   // ปุ่มนี้เป็น "สลับไปอ่านอีกแบบ" ไม่ใช่ "เริ่มอ่าน" — ชื่อจึงต้องบอกปลายทางให้ชัด
   if (readButton) readButton.href = readerUrl(book);
+  syncChapterList(book);
 }
 
 function getSpreadLabels(book) {
@@ -2933,6 +2938,7 @@ function updatePageControls(announce = false) {
   const rig = activeBook;
   const book = rig?.data || BOOKS[selectedIndex];
   const reading = rig?.reading;
+  syncChapterList(book);
   const labels = getSpreadLabels(book);
   const interactionLocked = mode !== "detail" || !readingOpen;
   const onePageNow = wantsOnePage();
@@ -4236,15 +4242,50 @@ async function loadChapterText(book, chapterNo) {
    ใส่หน้าจนเต็ม แถวที่มีกรอบ (โค้ด/กล่องหมายเหตุ) จะจำกลุ่มไว้ เพื่อวาดพื้นหลังคลุมเฉพาะ
    ส่วนที่ตกอยู่บนหน้านั้น — โค้ดยาวข้ามหน้าจึงยังมีกรอบต่อเนื่องทั้งสองหน้า */
 
-const STYLE = {
-  body: { size: 21, lh: 30, font: (s) => `400 ${s}px ${SERIF}` },
-  h1: { size: 31, lh: 40, before: 20, after: 10 },
-  h2: { size: 26, lh: 34, before: 18, after: 8 },
-  h3: { size: 22, lh: 30, before: 14, after: 6 },
-  code: { size: 15, lh: 22, pad: 12 },
-  table: { size: 15, lh: 21, pad: 8 },
+/* ขนาดตัวอักษรใช้ค่าเดียวกับหน้าอ่าน 2D (ebook:fontSize) จะได้ไม่ต้องตั้งสองที่
+   17 คือค่ากลาง ปรับได้ 14–26 แล้วสเกลทั้งชุดตามกัน */
+const BASE_READER_FONT = 17;
+
+function readerFontSize() {
+  const value = parseInt(localStorage.getItem("ebook:fontSize"), 10);
+  return value >= 14 && value <= 26 ? value : BASE_READER_FONT;
+}
+
+function fontScale() {
+  return readerFontSize() / BASE_READER_FONT;
+}
+
+const STYLE_BASE = {
+  body: { size: 19, lh: 27 },
+  h1: { size: 28, lh: 36, before: 20, after: 10 },
+  h2: { size: 24, lh: 31, before: 18, after: 8 },
+  h3: { size: 20, lh: 27, before: 14, after: 6 },
+  code: { size: 14, lh: 20, pad: 12 },
+  table: { size: 14, lh: 19, pad: 8 },
   gap: 14
 };
+
+let STYLE = STYLE_BASE;
+
+function applyFontScale() {
+  const k = fontScale();
+  const scale = (group, keys) => {
+    const out = { ...STYLE_BASE[group] };
+    keys.forEach((key) => { out[key] = Math.round(STYLE_BASE[group][key] * k); });
+    return out;
+  };
+  STYLE = {
+    body: scale("body", ["size", "lh"]),
+    h1: scale("h1", ["size", "lh"]),
+    h2: scale("h2", ["size", "lh"]),
+    h3: scale("h3", ["size", "lh"]),
+    code: scale("code", ["size", "lh"]),
+    table: scale("table", ["size", "lh"]),
+    gap: STYLE_BASE.gap
+  };
+}
+
+applyFontScale();
 
 let measureCanvas = null;
 
@@ -4335,7 +4376,7 @@ function blockRows(block) {
   if (block.kind === "para") {
     pushLines(wrapRuns(block.runs, COL, STYLE.body.size), STYLE.body.lh, (pieces, _i, ctx, y) => {
       ctx.globalAlpha = 1;
-      drawRunLine(ctx, pieces, M, y + 21);
+      drawRunLine(ctx, pieces, M, y + STYLE.body.size);
     });
     push(STYLE.gap, null);
     return rows;
@@ -4347,10 +4388,10 @@ function blockRows(block) {
     pushLines(wrapRuns(block.runs, COL - indent, STYLE.body.size), STYLE.body.lh, (pieces, index, ctx, y) => {
       ctx.globalAlpha = 1;
       if (index === 0) {
-        ctx.font = `500 17px ${SANS}`;
-        ctx.fillText(block.marker, M + block.depth * 22, y + 20);
+        ctx.font = `500 ${Math.round(15 * fontScale())}px ${SANS}`;
+        ctx.fillText(block.marker, M + block.depth * 22, y + STYLE.body.size - 1);
       }
-      drawRunLine(ctx, pieces, M + indent, y + 21);
+      drawRunLine(ctx, pieces, M + indent, y + STYLE.body.size);
     });
     push(6, null);
     return rows;
@@ -4368,9 +4409,9 @@ function blockRows(block) {
         ctx.fillText(CALLOUT_LABEL[block.tone] || block.tone, M + indent, y + 15);
       }, group, 1);
     }
-    pushLines(wrapRuns(block.runs, COL - indent - 12, STYLE.body.size - 2), 27, (pieces, _i, ctx, y) => {
+    pushLines(wrapRuns(block.runs, COL - indent - 12, STYLE.body.size - 2), STYLE.body.lh - 3, (pieces, _i, ctx, y) => {
       ctx.globalAlpha = 0.96;
-      drawRunLine(ctx, pieces, M + indent, y + 19);
+      drawRunLine(ctx, pieces, M + indent, y + STYLE.body.size - 2);
     }, group);
     push(STYLE.code.pad, null, group);
     push(STYLE.gap, null);
@@ -4399,7 +4440,7 @@ function blockRows(block) {
       push(STYLE.code.lh, (c, y) => {
         c.globalAlpha = 0.96;
         c.font = `${STYLE.code.size}px ${MONO}`;
-        c.fillText(text, M + 12, y + 15);
+        c.fillText(text, M + 12, y + STYLE.code.size + 1);
       }, group, index === 0 && wrapped.length > 1 ? 1 : 0, text.length);
     });
     push(STYLE.code.pad, null, group);
@@ -4411,28 +4452,49 @@ function blockRows(block) {
     groupSeq += 1;
     const group = { id: groupSeq, deco: "table" };
     const ctx = measureContext();
-    ctx.font = `${STYLE.table.size}px ${SANS}`;
     const all = [block.head, ...block.rows];
     const columns = block.head.length || 1;
-    const raw = block.head.map((_, index) =>
-      Math.max(...all.map((row) => ctx.measureText(row[index] || "").width)));
-    const total = raw.reduce((sum, w) => sum + w, 0) || 1;
-    const widths = raw.map((w) => Math.max(56, (w / total) * (PAGE_COL - columns * 12)));
-    const scale = PAGE_COL / (widths.reduce((s, w) => s + w, 0) + columns * 12);
-    const finalWidths = widths.map((w) => w * scale);
+
+    /* ความกว้างคอลัมน์คิดตามสัดส่วนของเนื้อหา แต่หน้ากระดาษกว้างเท่าเดิมเสมอ
+       พอผู้อ่านเร่งขนาดตัวอักษร คำเดียวอาจกว้างเกินช่องแล้วล้นไปทับคอลัมน์ข้าง ๆ
+       (wrapToWidth ตัดได้แค่ระหว่างคำ) จึงย่อเฉพาะตารางนั้นลงจนทุกคำพอดีช่อง */
+    const layoutAt = (size) => {
+      ctx.font = `${size}px ${SANS}`;
+      const raw = block.head.map((_, index) =>
+        Math.max(...all.map((row) => ctx.measureText(row[index] || "").width)));
+      const total = raw.reduce((sum, w) => sum + w, 0) || 1;
+      const widths = raw.map((w) => Math.max(56, (w / total) * (PAGE_COL - columns * 12)));
+      const scale = PAGE_COL / (widths.reduce((s, w) => s + w, 0) + columns * 12);
+      const finalWidths = widths.map((w) => w * scale);
+      const fits = all.every((row) => {
+        ctx.font = `${row === block.head ? 600 : 400} ${size}px ${SANS}`;
+        return block.head.every((_, index) => segmentText(String(row[index] ?? "").trim())
+          .every((piece) => ctx.measureText(piece.trim()).width <= finalWidths[index] - 6));
+      });
+      return { finalWidths, fits };
+    };
+
+    let size = STYLE.table.size;
+    let layout = layoutAt(size);
+    while (!layout.fits && size > 11) {
+      size -= 1;
+      layout = layoutAt(size);
+    }
+    const finalWidths = layout.finalWidths;
+    const lh = Math.max(size + 5, Math.round(STYLE.table.lh * (size / STYLE.table.size)));
 
     const drawRow = (row, head) => {
       const cells = row.map((text, index) =>
-        wrapToWidth(Object.assign(ctx, { font: `${head ? 600 : 400} ${STYLE.table.size}px ${SANS}` }), text, finalWidths[index] - 6, 3));
-      const height = Math.max(...cells.map((c) => c.length)) * STYLE.table.lh + STYLE.table.pad * 2;
+        wrapToWidth(Object.assign(ctx, { font: `${head ? 600 : 400} ${size}px ${SANS}` }), text, finalWidths[index] - 6, 3));
+      const height = Math.max(...cells.map((c) => c.length)) * lh + STYLE.table.pad * 2;
       push(height, (c, y) => {
         c.globalAlpha = head ? 0.14 : 0.05;
         c.fillRect(PAGE_M, y, PAGE_COL, height);
         c.globalAlpha = 1;
-        c.font = `${head ? 600 : 400} ${STYLE.table.size}px ${SANS}`;
+        c.font = `${head ? 600 : 400} ${size}px ${SANS}`;
         let x = PAGE_M + 6;
         cells.forEach((lines, index) => {
-          lines.forEach((line, li) => c.fillText(line, x, y + STYLE.table.pad + 15 + li * STYLE.table.lh));
+          lines.forEach((line, li) => c.fillText(line, x, y + STYLE.table.pad + size + 1 + li * lh));
           x += finalWidths[index];
         });
         c.globalAlpha = 0.25;
@@ -4875,16 +4937,48 @@ function readingFolioRange() {
   return [left, right];
 }
 
+/* เปลี่ยนขนาดตัวอักษร = จำนวนบรรทัดต่อหน้าเปลี่ยน ต้องจัดหน้าใหม่ทั้งบท
+   เนื้อหาถูกแคชไว้แล้วจึงไม่ต้องโหลดซ้ำ และคงตำแหน่งที่อ่านค้างไว้ตามสัดส่วน */
+async function relayoutReading() {
+  const rig = activeBook;
+  if (!rig?.reading || rig.reading.failed) return;
+  const no = rig.reading.chapterNo;
+  const ratio = rig.reading.count > 1 ? rig.reading.folio / (rig.reading.count - 1) : 0;
+  const blocks = await loadChapterText(rig.data, no);
+  if (!blocks || activeBook !== rig) return;
+
+  const pages = paginateChapter(blocks, no, rig.reading.title);
+  const specs = buildReadingSpecs(rig.data, no, pages);
+  rig.reading.specs = specs;
+  rig.reading.count = specs.count || specs.length;
+  rig.reading.batches = Math.ceil(rig.reading.count / facesPerBatch());
+  const folio = clamp(Math.round(ratio * (rig.reading.count - 1)), 0, rig.reading.count - 1);
+  renderReadingBatch(rig, Math.floor(folio / facesPerBatch()));
+  goToFolio(folio, true);
+  updatePageControls(false);
+}
+
+function setReaderFontSize(next) {
+  const size = clamp(next, 14, 26);
+  if (size === readerFontSize()) return;
+  localStorage.setItem("ebook:fontSize", String(size));
+  applyFontScale();
+  if (fontSizeLabel) fontSizeLabel.textContent = `${size}`;
+  if (activeBook?.reading) relayoutReading();
+  else if (activeBook) renderBrowsePages(activeBook);
+}
+
 let switchingChapter = false;
 
-async function goToChapter(direction) {
+async function switchChapter(target, landOnLastPage) {
   const rig = activeBook;
   // กดรัว ๆ ตอนบทกำลังโหลด จะทำให้สองรอบชนกันแล้วสถานะพัง
-  if (!rig?.reading || switchingChapter) return;
-  const target = rig.reading.chapterNo + direction;
-  if (target < 1 || target > rig.data.chapterPaths.length) return;
+  if (!rig?.reading || switchingChapter) return false;
+  if (target < 1 || target > rig.data.chapterPaths.length) return false;
+  if (target === rig.reading.chapterNo) return false;
 
   switchingChapter = true;
+  syncChapterList(rig.data);
   const previous = rig.reading;
   rig.reading = null;
   try {
@@ -4892,16 +4986,60 @@ async function goToChapter(direction) {
     if (!ok || activeBook !== rig) {
       rig.reading = rig.reading || previous;   // เข้าบทใหม่ไม่ได้ ให้กลับไปสถานะเดิม
       updatePageControls(false);
-      return;
+      return false;
     }
     // ถอยกลับ = ควรไปโผล่ที่หน้าสุดท้ายของบทก่อนหน้า ไม่ใช่หน้าแรก
-    if (direction < 0) goToFolio(rig.reading.count - 1, true);
+    if (landOnLastPage) goToFolio(rig.reading.count - 1, true);
     rig.data.lastChapter = target;
     populateDetail(rig.data);
     updatePageControls(true);
+    return true;
   } finally {
     switchingChapter = false;
+    syncChapterList(rig.data);
   }
+}
+
+async function goToChapter(direction) {
+  const rig = activeBook;
+  if (!rig?.reading) return;
+  await switchChapter(rig.reading.chapterNo + direction, direction < 0);
+}
+
+/* เลือกบทจากสารบัญได้ตรง ๆ — จากบทที่ 1 ไปบทที่ 4 ไม่ต้องกด "บทถัดไป" สามครั้ง
+   ถ้ายังไม่ได้เปิดอ่าน ให้ถือว่าเลือกบทแล้วเปิดเล่มไปที่บทนั้นเลย */
+async function jumpToChapter(no) {
+  const rig = activeBook;
+  if (!rig || switchingChapter) return;
+  const target = clamp(Math.round(no), 1, rig.data.chapterPaths.length);
+  if (!readingOpen || !rig.reading) {
+    rig.data.lastChapter = target;
+    setReadingOpen(true);
+    return;
+  }
+  await switchChapter(target, false);
+}
+
+function syncChapterList(book) {
+  if (!chapterSelect || !book) return;
+  const titles = book.chapterTitles || [];
+  const signature = `${book.id}:${titles.length}`;
+  if (chapterSelect.dataset.book !== signature) {
+    chapterSelect.textContent = "";
+    titles.forEach((title, index) => {
+      const option = document.createElement("option");
+      option.value = String(index + 1);
+      option.textContent = `บทที่ ${index + 1} — ${title}`;
+      chapterSelect.append(option);
+    });
+    chapterSelect.dataset.book = signature;
+  }
+  const current = (activeBook?.data === book && activeBook.reading?.chapterNo)
+    || book.lastChapter
+    || 1;
+  const value = String(clamp(current, 1, titles.length || 1));
+  if (chapterSelect.value !== value) chapterSelect.value = value;
+  chapterSelect.disabled = titles.length < 2 || switchingChapter;
 }
 
 function openDetail(origin = inspectButton) {
@@ -5838,6 +5976,13 @@ async function initialize() {
   spreadModeButton?.addEventListener("click", () => {
     setSpreadPreference(wantsOnePage() ? "two" : "one");
   });
+  chapterSelect?.addEventListener("change", () => {
+    const no = parseInt(chapterSelect.value, 10);
+    if (Number.isFinite(no)) jumpToChapter(no);
+  });
+  fontDownButton?.addEventListener("click", () => setReaderFontSize(readerFontSize() - 1));
+  fontUpButton?.addEventListener("click", () => setReaderFontSize(readerFontSize() + 1));
+  if (fontSizeLabel) fontSizeLabel.textContent = `${readerFontSize()}`;
   chapterPrevButton?.addEventListener("click", () => goToChapter(-1));
   chapterNextButton?.addEventListener("click", () => goToChapter(1));
 
@@ -5866,6 +6011,9 @@ async function initialize() {
     },
     turnPage,
     goToChapter,
+    jumpToChapter,
+    fontSize: () => readerFontSize(),
+    setFontSize: (size) => setReaderFontSize(size),
     toggleReading: (open) => setReadingOpen(open),
     isReading: () => mode === "detail" && readingOpen,
     // ขนาดแผงเปลี่ยน = พื้นที่ว่างเปลี่ยน กล้องต้องวัดกรอบใหม่
