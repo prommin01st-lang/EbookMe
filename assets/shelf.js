@@ -15,6 +15,25 @@ import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUnifo
 
 /* กระดาษกับหมึกต้องมาจากธีมที่ผู้ใช้เลือก ไม่ใช่จากสีปกหนังสือ
    เดิมหมึกคำนวณจากสีผ้าปก เล่มปกส้มเลยได้ตัวหนังสือสีส้มบนกระดาษครีม — อ่านแทบไม่ออก */
+/* มือถือมี GPU กับหน่วยความจำจำกัด และโดนหรี่ความเร็วเมื่อร้อน
+   เท็กซ์เจอร์ปกความละเอียดเต็มเล่มละ ~25MB คูณจำนวนหนังสือแล้วเกินที่เครื่องรับไหว
+   จึงลดขนาดลงครึ่งหนึ่งบนจอสัมผัส/จอแคบ ตาเปล่าแทบไม่เห็นต่างเพราะปกอยู่ไกล */
+const LOW_POWER = (() => {
+  try {
+    if (matchMedia("(pointer: coarse)").matches) return true;
+    return Math.min(screen.width, screen.height) < 820;
+  } catch {
+    return false;
+  }
+})();
+
+const TEX = {
+  cover: LOW_POWER ? { w: 448, h: 672 } : { w: 768, h: 1152 },
+  spine: LOW_POWER ? { w: 224, h: 896 } : { w: 384, h: 1536 },
+  page: LOW_POWER ? { w: 288, h: 432 } : { w: 384, h: 576 },
+  anisotropy: LOW_POWER ? 4 : 16
+};
+
 const READING_THEMES = {
   light: { paper: "#f7f2e8", wash: "255,255,255", grain: "92,76,55", ink: "#241f1a", exposure: 1.02, sheet: 0xf3ece0, room: 1.18 },
   sepia: { paper: "#f0e2c6", wash: "255,248,228", grain: "120,96,58", ink: "#3b2f1c", exposure: 0.92, sheet: 0xeadcbe, room: 1.0 },
@@ -306,6 +325,16 @@ let readingOpen = false;
 let detailBookHovered = false;
 let currentSpread = 0;
 let snapPages = false;     // ตัดภาพหน้ากระดาษทันที ไม่ต้องพลิก (ตอนข้ามชุดหน้า)
+let shadowDirty = true;    // สั่งวาดเงาใหม่รอบเดียว (เปลี่ยนธีม / ปรับขนาดจอ / หยิบเล่มใหม่)
+/* หนังสือบนชั้นลอยขยับเบา ๆ ตลอดเวลาเป็นเสน่ห์ของฉาก แต่ถ้าเปิดหน้าค้างไว้
+   มันคือการวาด 60fps ทั้งวัน — ให้ขยับเฉพาะช่วงที่ยังมีคนแตะหน้าจออยู่ */
+let heroActiveUntil = 0;
+let controlsActiveUntil = 0;
+
+function pokeHero() {
+  heroActiveUntil = performance.now() + 9000;
+  requestFrame();
+}
 let readingBusy = false;   // กำลังดึงเนื้อหาบทมาวาดลงกระดาษ
 let pendingReadChapter = 0; // มาจาก ?read3d= — เปิดอ่านทันทีเมื่อหนังสือถึงมือ
 let pointerDirty = false;
@@ -625,7 +654,7 @@ let sharedContactShadowTexture = null;
 
 function configureCanvasTexture(texture, {
   color = true,
-  anisotropy = 16
+  anisotropy = TEX.anisotropy
 } = {}) {
   if (color) texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = Math.min(
@@ -641,27 +670,29 @@ function configureCanvasTexture(texture, {
 
 function makeCoverTexture(book) {
   const canvasTexture = document.createElement("canvas");
-  canvasTexture.width = 768;
-  canvasTexture.height = 1152;
+  canvasTexture.width = TEX.cover.w;
+  canvasTexture.height = TEX.cover.h;
   const ctx = canvasTexture.getContext("2d");
+  // วาดในพิกัดออกแบบเดิมเสมอ แล้วย่อทั้งผืนตามโปรไฟล์เครื่อง เลย์เอาต์จะได้ไม่เพี้ยน
+  ctx.scale(canvasTexture.width / 768, canvasTexture.height / 1152);
 
   const random = seededRandom(hashSeed(book.id) + book.seed);
 
   ctx.fillStyle = book.color;
-  ctx.fillRect(0, 0, canvasTexture.width, canvasTexture.height);
+  ctx.fillRect(0, 0, 768, 1152);
 
-  const edge = ctx.createLinearGradient(0, 0, canvasTexture.width, 0);
+  const edge = ctx.createLinearGradient(0, 0, 768, 0);
   edge.addColorStop(0, "rgba(0,0,0,0.24)");
   edge.addColorStop(0.075, "rgba(255,255,255,0.035)");
   edge.addColorStop(0.5, "rgba(255,255,255,0.01)");
   edge.addColorStop(0.94, "rgba(0,0,0,0.06)");
   edge.addColorStop(1, "rgba(0,0,0,0.19)");
   ctx.fillStyle = edge;
-  ctx.fillRect(0, 0, canvasTexture.width, canvasTexture.height);
+  ctx.fillRect(0, 0, 768, 1152);
 
   for (let line = 0; line < 1250; line += 1) {
-    const x = random() * canvasTexture.width;
-    const y = random() * canvasTexture.height;
+    const x = random() * 768;
+    const y = random() * 1152;
     const length = 4 + random() * 22;
     ctx.strokeStyle = random() > 0.5 ? "rgba(255,255,255,0.024)" : "rgba(0,0,0,0.025)";
     ctx.lineWidth = 0.6 + random() * 0.8;
@@ -674,11 +705,11 @@ function makeCoverTexture(book) {
   ctx.strokeStyle = book.foil;
   ctx.globalAlpha = 0.72;
   ctx.lineWidth = 2;
-  ctx.strokeRect(42, 42, canvasTexture.width - 84, canvasTexture.height - 84);
-  ctx.strokeRect(55, 55, canvasTexture.width - 110, canvasTexture.height - 110);
+  ctx.strokeRect(42, 42, 768 - 84, 1152 - 84);
+  ctx.strokeRect(55, 55, 768 - 110, 1152 - 110);
   ctx.globalAlpha = 1;
 
-  drawMotif(ctx, book, canvasTexture.width, canvasTexture.height);
+  drawMotif(ctx, book, 768, 1152);
 
   // อีโมจิปกที่ผู้ใช้ตั้งไว้ ปั๊มเป็นลายน้ำจาง ๆ ให้จำเล่มได้จากระยะไกล
   if (book.cover) {
@@ -687,7 +718,7 @@ function makeCoverTexture(book) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = '300px "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
-    ctx.fillText(book.cover, canvasTexture.width / 2, canvasTexture.height * 0.37);
+    ctx.fillText(book.cover, 768 / 2, 1152 * 0.37);
     ctx.restore();
   }
 
@@ -699,11 +730,13 @@ function makeCoverTexture(book) {
 
 function makeFoilTexture(book) {
   const foilCanvas = document.createElement("canvas");
-  foilCanvas.width = 768;
-  foilCanvas.height = 1152;
+  foilCanvas.width = TEX.cover.w;
+  foilCanvas.height = TEX.cover.h;
   const ctx = foilCanvas.getContext("2d");
+  // วาดในพิกัดออกแบบเดิมเสมอ แล้วย่อทั้งผืนตามโปรไฟล์เครื่อง เลย์เอาต์จะได้ไม่เพี้ยน
+  ctx.scale(foilCanvas.width / 768, foilCanvas.height / 1152);
 
-  ctx.clearRect(0, 0, foilCanvas.width, foilCanvas.height);
+  ctx.clearRect(0, 0, 768, 1152);
   ctx.fillStyle = "#ffffff";
   ctx.strokeStyle = "#ffffff";
   ctx.textAlign = "left";
@@ -857,7 +890,7 @@ function makeEmbossMap(sourceTexture, name) {
   texture.rotation = sourceTexture.rotation;
   return configureCanvasTexture(texture, {
     color: false,
-    anisotropy: 16
+    anisotropy: TEX.anisotropy
   });
 }
 
@@ -903,8 +936,8 @@ function makePaperFaceTexture(book, printed = false) {
   if (!printed && sharedPaperFaceTexture) return sharedPaperFaceTexture;
 
   const paperCanvas = document.createElement("canvas");
-  paperCanvas.width = 768;
-  paperCanvas.height = 1152;
+  paperCanvas.width = LOW_POWER ? 448 : 768;
+  paperCanvas.height = LOW_POWER ? 672 : 1152;
   const ctx = paperCanvas.getContext("2d");
   const random = seededRandom(printed
     ? hashSeed(`${book.id}-printed-page`) + book.seed
@@ -1012,8 +1045,8 @@ function drawWrappedCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines =
 
 function makeEndpaperTexture(book) {
   const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 768;
+  canvas.width = LOW_POWER ? 320 : 512;
+  canvas.height = LOW_POWER ? 480 : 768;
   const ctx = canvas.getContext("2d");
   const random = seededRandom(hashSeed(`${book.id}-endpaper`) + book.seed);
   drawPaperSurface(ctx, canvas.width, canvas.height, random);
@@ -1042,7 +1075,7 @@ function makeEndpaperTexture(book) {
   ctx.restore();
 
   const texture = configureCanvasTexture(new THREE.CanvasTexture(canvas), {
-    anisotropy: 16
+    anisotropy: TEX.anisotropy
   });
   texture.name = `${book.id}-patterned-endpaper`;
   return texture;
@@ -1063,10 +1096,10 @@ const TEXT_BOTTOM = 704;
 
 function makeInteriorPageTexture(book, spec, folio) {
   const canvas = document.createElement("canvas");
-  canvas.width = 384;
-  canvas.height = 576;
+  canvas.width = TEX.page.w;
+  canvas.height = TEX.page.h;
   const ctx = canvas.getContext("2d");
-  ctx.scale(0.75, 0.75);
+  ctx.scale(canvas.width / PAGE_W, canvas.height / PAGE_H);
   const random = seededRandom(hashSeed(`${book.id}-leaf-${spec.kind}-${folio}`) + book.seed);
   drawPaperSurface(ctx, PAGE_W, PAGE_H, random);
 
@@ -1239,7 +1272,7 @@ function makeInteriorPageTexture(book, spec, folio) {
     ctx.globalAlpha = 1;
   }
 
-  const texture = configureCanvasTexture(new THREE.CanvasTexture(canvas), { anisotropy: 16 });
+  const texture = configureCanvasTexture(new THREE.CanvasTexture(canvas), { anisotropy: TEX.anisotropy });
   texture.name = `${book.id}-page-${folio + 1}-${spec.kind}`;
   return texture;
 }
@@ -1395,8 +1428,8 @@ function createPageBlockGeometry(width, height, depth, radius) {
 
 function makeSpineTexture(book) {
   const spineCanvas = document.createElement("canvas");
-  spineCanvas.width = 384;
-  spineCanvas.height = 1536;
+  spineCanvas.width = TEX.spine.w;
+  spineCanvas.height = TEX.spine.h;
   const ctx = spineCanvas.getContext("2d");
   const random = seededRandom(hashSeed(`${book.id}-spine-cloth`) + book.seed);
   ctx.fillStyle = book.color;
@@ -1440,44 +1473,46 @@ function makeSpineTexture(book) {
 
   return configureCanvasTexture(
     new THREE.CanvasTexture(spineCanvas),
-    { anisotropy: 16 }
+    { anisotropy: TEX.anisotropy }
   );
 }
 
 function makeSpineFoilTexture(book) {
   const foilCanvas = document.createElement("canvas");
-  foilCanvas.width = 384;
-  foilCanvas.height = 1536;
+  foilCanvas.width = TEX.spine.w;
+  foilCanvas.height = TEX.spine.h;
   const ctx = foilCanvas.getContext("2d");
+  // วาดในพิกัดออกแบบเดิมเสมอ แล้วย่อทั้งผืนตามโปรไฟล์เครื่อง เลย์เอาต์จะได้ไม่เพี้ยน
+  ctx.scale(foilCanvas.width / 384, foilCanvas.height / 1536);
 
-  ctx.clearRect(0, 0, foilCanvas.width, foilCanvas.height);
+  ctx.clearRect(0, 0, 384, 1536);
   ctx.fillStyle = "#ffffff";
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 2.4;
-  ctx.strokeRect(34, 38, foilCanvas.width - 68, foilCanvas.height - 76);
+  ctx.strokeRect(34, 38, 384 - 68, 1536 - 76);
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = `500 24px ${SANS}`;
   ctx.letterSpacing = "5px";
-  ctx.fillText(book.roman, foilCanvas.width * 0.5, 118);
+  ctx.fillText(book.roman, 384 * 0.5, 118);
   ctx.letterSpacing = "0px";
 
   ctx.save();
-  ctx.translate(foilCanvas.width * 0.5, foilCanvas.height * 0.5);
+  ctx.translate(384 * 0.5, 1536 * 0.5);
   ctx.rotate(Math.PI / 2);
   // สันหนังสือมีที่จำกัด ชื่อไทยยาว ๆ ต้องย่อจนพอดีความสูงของสัน
-  const spineSize = fitFontSize(ctx, book.title, foilCanvas.height - 320, 400, SERIF, 68, 26, 1);
+  const spineSize = fitFontSize(ctx, book.title, 1536 - 320, 400, SERIF, 68, 26, 1);
   ctx.font = `400 ${spineSize}px ${SERIF}`;
-  ctx.fillText(wrapToWidth(ctx, book.title, foilCanvas.height - 320, 1)[0] || "", 0, 0);
+  ctx.fillText(wrapToWidth(ctx, book.title, 1536 - 320, 1)[0] || "", 0, 0);
   ctx.restore();
 
   ctx.beginPath();
-  ctx.arc(foilCanvas.width * 0.5, foilCanvas.height - 120, 24, 0, Math.PI * 2);
+  ctx.arc(384 * 0.5, 1536 - 120, 24, 0, Math.PI * 2);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(foilCanvas.width * 0.5 - 24, foilCanvas.height - 120);
-  ctx.lineTo(foilCanvas.width * 0.5 + 24, foilCanvas.height - 120);
+  ctx.moveTo(384 * 0.5 - 24, 1536 - 120);
+  ctx.lineTo(384 * 0.5 + 24, 1536 - 120);
   ctx.stroke();
 
   return configureCanvasTexture(new THREE.CanvasTexture(foilCanvas));
@@ -1485,8 +1520,8 @@ function makeSpineFoilTexture(book) {
 
 function makeBackCoverTexture(book) {
   const backCanvas = document.createElement("canvas");
-  backCanvas.width = 768;
-  backCanvas.height = 1152;
+  backCanvas.width = TEX.cover.w;
+  backCanvas.height = TEX.cover.h;
   const ctx = backCanvas.getContext("2d");
   const random = seededRandom(hashSeed(`${book.id}-back-cloth`) + book.seed);
 
@@ -1533,11 +1568,13 @@ function makeBackCoverTexture(book) {
 
 function makeBackFoilTexture(book) {
   const foilCanvas = document.createElement("canvas");
-  foilCanvas.width = 768;
-  foilCanvas.height = 1152;
+  foilCanvas.width = TEX.cover.w;
+  foilCanvas.height = TEX.cover.h;
   const ctx = foilCanvas.getContext("2d");
+  // วาดในพิกัดออกแบบเดิมเสมอ แล้วย่อทั้งผืนตามโปรไฟล์เครื่อง เลย์เอาต์จะได้ไม่เพี้ยน
+  ctx.scale(foilCanvas.width / 768, foilCanvas.height / 1152);
 
-  ctx.clearRect(0, 0, foilCanvas.width, foilCanvas.height);
+  ctx.clearRect(0, 0, 768, 1152);
   ctx.fillStyle = "#ffffff";
   ctx.strokeStyle = "#ffffff";
   ctx.textAlign = "left";
@@ -1648,16 +1685,19 @@ function createBookRig(book, index) {
   const clothBumpTexture = makeClothBumpTexture(book);
   const clothSurfaceMaps = makeClothSurfaceMaps(book);
   const paperFaceTexture = makePaperFaceTexture(book);
-  const interiorPageTextures = makeInteriorPageTextures(book);
-  const endpaperTexture = makeEndpaperTexture(book);
   const pageEdgeTextures = makePageEdgeTextures(book);
   const spineTexture = makeSpineTexture(book);
   const spineFoilTexture = makeSpineFoilTexture(book);
-  const backCoverTexture = makeBackCoverTexture(book);
-  const backFoilTexture = makeBackFoilTexture(book);
   const foilEmbossTexture = makeEmbossMap(foilTexture, `${book.id}-front-foil-emboss`);
   const spineEmbossTexture = makeEmbossMap(spineFoilTexture, `${book.id}-spine-foil-emboss`);
-  const backEmbossTexture = makeEmbossMap(backFoilTexture, `${book.id}-back-foil-emboss`);
+  /* ปกหลัง ใบรองปก และหน้าในมองไม่เห็นเลยตอนหนังสือยืนอยู่บนชั้น
+     สร้างไว้ล่วงหน้าทุกเล่มกินหน่วยความจำ GPU เล่มละ ~25MB ฟรี ๆ
+     รอสร้างตอนหยิบเล่มนั้นออกมาดูจริง (ดูที่ ensureInspectAssets) */
+  const interiorPageTextures = [];
+  const backCoverTexture = null;
+  const backFoilTexture = null;
+  const backEmbossTexture = null;
+  const endpaperTexture = null;
   const cloth = new THREE.MeshPhysicalMaterial({
     color: book.color,
     normalMap: clothSurfaceMaps.normal,
@@ -1738,6 +1778,7 @@ function createBookRig(book, index) {
     side: THREE.DoubleSide
   });
   const backArt = new THREE.MeshPhysicalMaterial({
+    color: book.color,
     map: backCoverTexture,
     normalMap: clothSurfaceMaps.normal,
     normalScale: new THREE.Vector2(0.28, 0.28),
@@ -1814,9 +1855,9 @@ function createBookRig(book, index) {
   });
   const pageMaterial = createFadeMaterial(shared.page);
   const headbandMaterial = createFadeMaterial(shared.headband);
-  const interiorPageMaterials = interiorPageTextures.map((texture) => {
+  const interiorPageMaterials = Array.from({ length: PAGE_FACES }, () => {
     const material = createFadeMaterial(shared.pageSheet);
-    material.map = texture;
+    material.map = paperFaceTexture;
     material.bumpMap = paperFaceTexture;
     material.bumpScale = 0.0012;
     material.roughness = 0.96;
@@ -1888,7 +1929,7 @@ function createBookRig(book, index) {
     backSurfaceLayered: true,
     clothPbrMaps: true,
     foilEmbossed: true,
-    interiorPageDesigns: interiorPageTextures.length,
+    interiorPageDesigns: PAGE_FACES,
     flexiblePageSegments: FLEXIBLE_PAGE_SEGMENTS,
     clothLikePageDeformation: true,
     turnInStrips: 8,
@@ -2286,6 +2327,9 @@ function createBookRig(book, index) {
     paperFaceTexture,
     interiorPageTextures,
     interiorPageMaterials,
+    backArt,
+    backFoilArt,
+    endpaperMaterial,
     endpaperTexture,
     pageEdgeTextures,
     spineTexture,
@@ -2547,7 +2591,7 @@ function addLights() {
   key.name = "shadow-key";
   key.position.set(-4.6, 7.4, 5.8);
   key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.mapSize.set(LOW_POWER ? 1024 : 2048, LOW_POWER ? 1024 : 2048);
   key.shadow.camera.left = -6;
   key.shadow.camera.right = 6;
   key.shadow.camera.top = 6;
@@ -2579,6 +2623,8 @@ function addLights() {
   rim.lookAt(-0.2, 1.5, 0);
   scene.add(rim);
   roomLights.rim = rim;
+
+  if (LOW_POWER) return; // ไฟเสริมอีกสามดวงเป็นงานคำนวณต่อพิกเซลที่มือถือไม่ไหว
 
   const backFill = new THREE.RectAreaLight(0xd8e3e7, 2.7, 3.8, 4.8);
   backFill.name = "back-cover-softbox";
@@ -2680,6 +2726,7 @@ function applyReadingTheme() {
     sharedPageEdgeTextures = null;
   }
 
+  shadowDirty = true;
   if (BOOKS[selectedIndex]) applyBookTheme(BOOKS[selectedIndex]);
   if (activeBook?.reading) renderReadingBatch(activeBook, activeBook.reading.batch);
   requestFrame();
@@ -3084,6 +3131,22 @@ function updateFlexiblePage(
     }
     position.needsUpdate = true;
     geometry.computeVertexNormals();
+  });
+}
+
+// กระดาษยังพลิกไม่สุดหรือปกยังกางไม่สุด = ต้องวาดต่อ
+function pageSettling(rig) {
+  if (!rig) return false;
+  const coverTarget = readingOpen ? -Math.PI + 0.055 : 0;
+  if (Math.abs(rig.frontPivot.rotation.y - coverTarget) > 0.002) return true;
+  return rig.pagePivots.some((pivot, index) => {
+    const leafOrder = rig.pagePivots.length - 1 - index;
+    if (leafOrder >= PAGINATED_LEAF_COUNT) return false;
+    const turned = leafOrder < currentSpread;
+    const target = turned
+      ? -Math.PI + 0.085 + leafOrder * 0.014
+      : -0.038 + leafOrder * 0.008;
+    return Math.abs(pivot.rotation.y - target) > 0.002;
   });
 }
 
@@ -3678,6 +3741,7 @@ function positionPointerLabel() {
 }
 
 function onPointerMove(event) {
+  pokeHero();
   setPointerFromEvent(event);
   positionPointerLabel();
   requestFrame();
@@ -3700,6 +3764,7 @@ const shelfDrag = { active: false, pointerId: null, startX: 0, startY: 0, startP
 const SHELF_DRAG_SLOP = 10;
 
 function onShelfPointerDown(event) {
+  pokeHero();
   if (mode !== "hero" || event.button !== 0 || shelfDrag.active) return;
   shelfDrag.active = true;
   shelfDrag.pointerId = event.pointerId;
@@ -3764,6 +3829,7 @@ function onCanvasClick(event) {
 }
 
 function onWheel(event) {
+  pokeHero();
   if (mode !== "hero") return;
   event.preventDefault();
   const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
@@ -3910,6 +3976,11 @@ function disposeReadingTextures(rig) {
   rig.readingTextures = [];
 }
 
+function disposeLazyTextures(rig) {
+  (rig.lazyTextures || []).forEach((texture) => texture?.dispose());
+  rig.lazyTextures = [];
+}
+
 function renderReadingBatch(rig, batch) {
   const book = rig.data;
   const specs = rig.reading.specs;
@@ -3934,6 +4005,48 @@ function renderReadingBatch(rig, batch) {
   requestFrame();
 }
 
+/* สร้างภาพที่ใช้เฉพาะตอนหยิบเล่มออกมาดู — เรียกครั้งเดียวต่อเล่ม
+   นี่คือส่วนที่ทำให้หน่วยความจำ GPU ไม่บวมตามจำนวนหนังสือบนชั้น */
+function ensureInspectAssets(rig) {
+  if (rig.inspectReady) return;
+  rig.inspectReady = true;
+  const book = rig.data;
+
+  const back = makeBackCoverTexture(book);
+  const backFoil = makeBackFoilTexture(book);
+  const backEmboss = makeEmbossMap(backFoil, `${book.id}-back-foil-emboss`);
+  const endpaper = makeEndpaperTexture(book);
+
+  rig.backArt.map = back;
+  rig.backArt.color.setHex(0xffffff);
+  rig.backArt.needsUpdate = true;
+  rig.backFoilArt.map = backFoil;
+  rig.backFoilArt.alphaMap = backFoil;
+  rig.backFoilArt.bumpMap = backEmboss;
+  rig.backFoilArt.needsUpdate = true;
+  rig.endpaperMaterial.map = endpaper;
+  rig.endpaperMaterial.needsUpdate = true;
+
+  rig.lazyTextures = [back, backFoil, backEmboss, endpaper];
+  requestFrame();
+}
+
+// หน้าในแบบ "เปิดดูเฉย ๆ" ใช้ตอนดึงเนื้อหาบทไม่สำเร็จ
+function renderBrowsePages(rig) {
+  const specs = browsePageSpecs(rig.data);
+  disposeReadingTextures(rig);
+  rig.readingTextures = [];
+  specs.forEach((spec, face) => {
+    const material = rig.interiorPageMaterials[face];
+    if (!material) return;
+    const texture = makeInteriorPageTexture(rig.data, spec, face);
+    rig.readingTextures.push(texture);
+    material.map = texture;
+    material.needsUpdate = true;
+  });
+  requestFrame();
+}
+
 async function enterReading(rig, chapterNo) {
   const book = rig.data;
   const no = clamp(chapterNo, 1, Math.max(1, book.chapterPaths.length));
@@ -3946,6 +4059,7 @@ async function enterReading(rig, chapterNo) {
   // ระหว่างรอโหลด ผู้ใช้อาจปิดเล่มหรือเปลี่ยนไปเล่มอื่นแล้ว
   if (activeBook !== rig) return false;
   if (!paragraphs) {
+    renderBrowsePages(rig);
     updatePageControls(false);
     return false;
   }
@@ -4063,6 +4177,8 @@ function openDetail(origin = inspectButton) {
       ? origin
       : inspectButton;
   activeBook = bookRigs[selectedIndex];
+  ensureInspectAssets(activeBook);
+  shadowDirty = true;
   activeBook.contactShadow.visible = false;
   refreshProgress(activeBook.data);
   populateDetail(activeBook.data);
@@ -4160,6 +4276,8 @@ function finishOpening() {
   controls.update();
   updatePageControls(false);
   experience.classList.remove("is-opening");
+  // เล่มที่หยิบออกมาถูกย้ายออกจาก shelfStage แล้ว ที่เหลือไม่มีใครเห็น
+  shelfStage.visible = false;
   if (pendingReadChapter) {
     const chapter = pendingReadChapter;
     pendingReadChapter = 0;
@@ -4171,6 +4289,7 @@ function finishOpening() {
 }
 
 function closeDetail() {
+  shelfStage.visible = true;
   if (mode !== "detail") return;
   cancelPageDrag();
   resetDetailPress();
@@ -4519,7 +4638,9 @@ function updateShelfLayout(delta, elapsed) {
       updateFlexiblePage(pagePivot, 0, delta);
     });
 
-    const idle = reducedMotion ? 0 : Math.sin(elapsed * 0.72 + index * 0.8) * 0.012 * focus;
+    const idle = (reducedMotion || performance.now() > heroActiveUntil)
+      ? 0
+      : Math.sin(elapsed * 0.72 + index * 0.8) * 0.012 * focus;
     rig.motion.position.y = damp(rig.motion.position.y, idle + (hoverPreview ? 0.035 : 0), 9, delta);
     rig.motion.rotation.x = damp(
       rig.motion.rotation.x,
@@ -4577,6 +4698,7 @@ function updateDust(elapsed) {
 
 function requestFrame() {
   if (!rafId && !suspended) {
+    renderer.shadowMap.needsUpdate = true;
     rafId = requestAnimationFrame(frame);
   }
 }
@@ -4618,16 +4740,27 @@ function frame(time) {
     updatePaginatedBook(activeBook, delta, getDetailOpenAmount());
   }
 
-  renderer.render(scene, camera);
-  snapPages = false;
-
+  /* ต้นฉบับวาดต่อเนื่อง 60fps ตลอดเวลา เพราะมีหนังสือลอยขยับกับฝุ่นในอากาศ
+     บนมือถือแปลว่า GPU ทำงานเต็มที่ตลอดที่เปิดหน้าไว้ เครื่องร้อนแล้วโดนหรี่ความเร็ว
+     — นั่นคืออาการ "กระตุก" ที่แท้จริง ตอนอ่านหนังสือฉากนิ่งสนิทอยู่แล้ว จึงหยุดวาดได้ */
   const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || wheelIdle > 0;
-  const shouldContinue = !reducedMotion
+  const pagesSettling = mode === "detail" && (pageDrag.active || pageSettling(activeBook));
+  const idleAnimation = mode === "hero" && !reducedMotion && time < heroActiveUntil + 1500;
+  const geometryMoving = idleAnimation
     || mode === "opening"
     || mode === "closing"
     || shelfMoving
-    || framingActive
+    || pagesSettling
     || themeIsMoving;
+
+  // เงาเปลี่ยนก็ต่อเมื่อวัตถุขยับ กล้องไถลอย่างเดียวไม่ต้องคำนวณเงาใหม่
+  renderer.shadowMap.needsUpdate = geometryMoving || shadowDirty;
+  shadowDirty = false;
+  renderer.render(scene, camera);
+  snapPages = false;
+
+  const cameraSettling = mode === "detail" && time < controlsActiveUntil;
+  const shouldContinue = geometryMoving || framingActive || cameraSettling;
   if (shouldContinue && !suspended) requestFrame();
 }
 
@@ -4639,6 +4772,7 @@ function resize() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, viewWidth < 820 ? 1.5 : 2));
   camera.aspect = viewWidth / viewHeight;
   camera.updateProjectionMatrix();
+  shadowDirty = true;
 
   if (mode === "hero") {
     camera.position.copy(shelfCameraPosition);
@@ -4836,7 +4970,7 @@ async function initialize() {
   try {
     renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      antialias: !LOW_POWER,
       alpha: true,
       powerPreference: "high-performance"
     });
@@ -4849,7 +4983,10 @@ async function initialize() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.9;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = LOW_POWER ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+  // เงาไม่ได้เปลี่ยนทุกเฟรม วาดใหม่เฉพาะตอนที่มีอะไรขยับจริง
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.setClearColor(0x000000, 0);
 
   scene = new THREE.Scene();
@@ -4880,7 +5017,12 @@ async function initialize() {
   controls.minPolarAngle = Math.PI * 0.24;
   controls.maxPolarAngle = Math.PI * 0.76;
   controls.target.copy(shelfCameraTarget);
-  controls.addEventListener("change", requestFrame);
+  /* OrbitControls มี damping — หลังปล่อยนิ้วกล้องยังไหลต่ออีกหลายเฟรม
+     ถ้าหยุดวาดทันทีที่ปล่อย การหมุนจะค้างกลางทาง จึงวาดต่ออีกช่วงสั้น ๆ */
+  controls.addEventListener("change", () => {
+    controlsActiveUntil = performance.now() + 350;
+    requestFrame();
+  });
   controls.addEventListener("start", () => {
     framingActive = false;
     controls.enabled = true;
@@ -4928,6 +5070,7 @@ async function initialize() {
   document.addEventListener("visibilitychange", onVisibilityChange);
   reducedMotionQuery.addEventListener("change", onReducedMotionChange);
 
+  window.addEventListener("keydown", pokeHero);
   previousButton.addEventListener("click", () => navigate(-1, previousButton));
   nextButton.addEventListener("click", () => navigate(1, nextButton));
   inspectButton.addEventListener("click", () => openDetail(inspectButton));
@@ -4949,6 +5092,7 @@ async function initialize() {
   loading.hidden = true;
   experience.classList.add("webgl-ready");
   document.body.classList.add("shelf-ready");
+  pokeHero();
   requestFrame();
 
   // ให้หน้าอื่น (ปุ่มสลับมุมมอง/ค้นหา) สั่งชั้นหนังสือได้โดยไม่ต้องรู้ภายใน
