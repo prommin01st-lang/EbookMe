@@ -124,7 +124,8 @@
         <dd id="detail-motif"></dd>
       </div>
     </dl>
-    <div class="page-navigation" role="group" aria-label="พลิกดูหน้าตัวอย่าง">
+    </div>
+    <div class="page-navigation" role="group" aria-label="พลิกหน้า">
       <button class="page-button" id="previous-page" type="button" aria-label="หน้าก่อนหน้า" disabled>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 3.5-4.5 4.5 4.5 4.5"></path></svg>
       </button>
@@ -140,7 +141,6 @@
       <button class="text-button reset-button" id="chapter-prev" type="button" disabled>‹ บทก่อนหน้า</button>
       <button class="text-button reset-button" id="spread-mode" type="button" hidden>▭▭ หน้าคู่</button>
       <button class="text-button reset-button" id="chapter-next" type="button" disabled>บทถัดไป ›</button>
-    </div>
     </div>
     <div class="detail-controls">
       <div class="detail-buttons">
@@ -244,7 +244,8 @@ const SURFACE_KEY = 'ebook:readSurface';
 function canRead3D() {
   if (document.body.classList.contains('no-webgl')) return false;
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
-  return Math.min(innerWidth, innerHeight) >= 360 && innerWidth >= 400;
+  // มือถือมาตรฐานกว้าง 360–430px อ่าน 3D ได้สบาย เหลือกันไว้แค่จอที่เล็กจริง ๆ
+  return Math.min(innerWidth, innerHeight) >= 320;
 }
 
 const panelEl = document.getElementById('detail-panel');

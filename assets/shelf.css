@@ -383,13 +383,26 @@ a:focus-visible {
   padding-bottom: 7px;
 }
 
+/* หนังสือ 20+ เล่มขีดดัชนีล้นจอ ให้เลื่อนแนวนอนแทนการตัดบรรทัด
+   (shelf.js เลื่อนขีดของเล่มที่เลือกเข้ามาให้เอง) */
 .markers {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
   gap: 5px;
   max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.markers::-webkit-scrollbar {
+  display: none;
+}
+
+.marker {
+  flex: 0 0 auto;
 }
 
 .marker {
@@ -766,7 +779,9 @@ body:not(.no-webgl) .fallback-note {
 
 /* ---------- จอแคบ ---------- */
 
-@media (max-width: 900px) {
+/* แนวตั้งไม่ว่าจอกว้างแค่ไหน ก็ใช้แผงรายละเอียดแบบแผ่นล่างจอ
+   แท็บเล็ตแนวตั้งกว้าง 1000px+ ถ้าวางแผงไว้ด้านข้าง หนังสือจะโดนบีบจนล้นขอบ */
+@media (max-width: 900px), (orientation: portrait) {
   .editorial-header {
     right: 18px;
     left: 18px;
@@ -775,8 +790,9 @@ body:not(.no-webgl) .fallback-note {
   .browse-ui {
     right: 18px;
     left: 18px;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px 16px;
+    /* คอลัมน์ขวาต้องยอมหด ไม่งั้นแถบดัชนีหนังสือสิบเล่มดันปุ่มพลิกเล่มตกจอไปทางซ้าย */
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px 12px;
   }
 
   .selection {
@@ -785,6 +801,7 @@ body:not(.no-webgl) .fallback-note {
 
   .index-nav {
     align-self: center;
+    min-width: 0;
   }
 
   .microcopy {
@@ -839,12 +856,34 @@ body:not(.no-webgl) .fallback-note {
     -webkit-line-clamp: 3;
   }
 
-  /* หุบแล้วเหลือแค่ชื่อเรื่องกับปุ่มอ่าน — หนังสือได้ทั้งจอ */
+  /* จอแคบ: ปุ่มพลิกหน้าต้องอยู่เหนือส่วนที่หุบได้ ไม่งั้นพอหุบแล้วเหลือแต่การลากนิ้ว
+     และไม่รู้ว่าอ่านถึงหน้าไหน */
+  .detail-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .eyebrow { order: -3; }
+  .detail-title { order: -2; }
+  .page-navigation { order: -1; }
+
+  .detail-panel:not(.is-reading) .page-navigation {
+    display: none;
+  }
+
+  .page-navigation {
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+
+  /* หุบแล้วเหลือชื่อเรื่อง แถบพลิกหน้า และปุ่มอ่าน — หนังสือได้ที่เหลือทั้งหมด */
   .detail-panel.is-collapsed {
     max-height: none;
   }
 
   .detail-panel.is-collapsed .detail-body,
+  .detail-panel.is-collapsed .chapter-nav,
+  .detail-panel.is-collapsed #reset-view,
   .detail-panel.is-collapsed .detail-controls .microcopy {
     display: none;
   }
@@ -920,6 +959,81 @@ body:not(.no-webgl) .fallback-note {
   .selection__note,
   .microcopy {
     display: none;
+  }
+}
+
+/* นิ้วแม่นน้อยกว่าเมาส์ — ปุ่มกลมต้องได้ 44px ตามเกณฑ์พื้นที่แตะ */
+@media (pointer: coarse) {
+  .round-button,
+  .page-button,
+  .close-button,
+  .panel-toggle,
+  .tool-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .round-button,
+  .page-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .text-button {
+    min-height: 44px;
+  }
+
+  .marker {
+    width: 30px;
+    height: 34px;
+  }
+}
+
+/* มือถือแนวนอน: สูงไม่ถึง 480px แถบบน-ล่างกินที่จนหนังสือแทบไม่เหลือ */
+@media (max-height: 480px) {
+  .editorial-header {
+    top: 10px;
+    right: 12px;
+    left: 12px;
+  }
+
+  .editorial-identity {
+    display: none;
+  }
+
+  .browse-ui {
+    bottom: max(8px, env(safe-area-inset-bottom));
+    right: 12px;
+    left: 12px;
+    gap: 6px 12px;
+  }
+
+  .selection__note,
+  .microcopy {
+    display: none;
+  }
+
+  .selection__title {
+    font-size: 1.15rem;
+  }
+
+  .counter {
+    padding-top: 3px;
+  }
+
+  .detail-panel {
+    max-height: calc(100dvh - 20px);
+    padding: 8px 12px 10px;
+  }
+
+  .detail-panel .detail-deck,
+  .detail-panel .meta-list {
+    display: none;
+  }
+
+  .detail-title {
+    font-size: 1.1rem;
+    -webkit-line-clamp: 1;
   }
 }
 

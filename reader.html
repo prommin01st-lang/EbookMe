@@ -747,7 +747,7 @@ $('modeBtn').addEventListener('click', () => setMode(paged() ? 'scroll' : 'page'
    เพราะกดไปแล้วก็ถูกเด้งกลับมาที่นี่อยู่ดี */
 (function () {
   const btn = $('read3dBtn');
-  const tiny = Math.min(innerWidth, innerHeight) < 360 || innerWidth < 400;
+  const tiny = Math.min(innerWidth, innerHeight) < 320;
   if (tiny || matchMedia('(prefers-reduced-motion: reduce)').matches) {
     btn.hidden = true;
     return;

@@ -70,8 +70,9 @@ const BINDINGS = [
     }
   },
   {
-    label: "ฟ้าหม่น · กระดูก",
-    color: "#4c7c9b", foil: "#eef2f1",
+    label: "ฟ้าหม่น · หมึกน้ำเงิน",
+    // ปกสีอ่อน ฟอยล์ต้องเข้มถึงจะอ่านชื่อออก แต่ปุ่มบน UI อยู่บนพื้นเข้ม จึงแยกสีกัน
+    color: "#4c7c9b", foil: "#16323f", accent: "#a9d5ea",
     palette: {
       paper: "#223038", paperDeep: "#141d23", paperPale: "#eef3f5",
       ink: "#eef3f5", inkSoft: "#a9b8c0",
@@ -198,6 +199,7 @@ function buildBooks(catalog) {
       paletteLabel: binding.label,
       color: binding.color,
       foil: binding.foil,
+      accent: binding.accent || binding.foil,
       palette: binding.palette,
       // เล่มหนาตามจำนวนบท ชั้นหนังสือจึงดูเป็นของจริงแทนที่จะเท่ากันหมด
       width: 0.94 + random() * 0.16,
@@ -2326,8 +2328,14 @@ function createBookRig(book, index) {
   };
 }
 
+// แนวตั้งคือ "แคบ" เสมอ แม้จอจะกว้าง 1200px — แผงรายละเอียดไปอยู่ด้านล่าง
+// ไม่ใช่ด้านข้าง กรอบกล้องจึงต้องวางหนังสือไว้กลางจอ ไม่ใช่เยื้องซ้าย
+function isPortraitLayout() {
+  return viewHeight >= viewWidth;
+}
+
 function configureResponsiveTargets() {
-  const narrow = viewWidth < 820;
+  const narrow = viewWidth < 820 || isPortraitLayout();
   shelfCameraPosition.set(0, narrow ? 2.02 : 1.92, narrow ? 8.7 : 8.1);
   shelfCameraTarget.set(0, narrow ? 1.57 : 1.55, 0);
   inspectPosition.set(narrow ? 0 : -2.25, narrow ? 2.3 : 1.56, narrow ? 0.15 : 0);
@@ -2351,7 +2359,7 @@ function configureResponsiveTargets() {
 }
 
 function getInspectScale() {
-  if (!activeBook || viewWidth < 820) return 0.82;
+  if (!activeBook || viewWidth < 820 || isPortraitLayout()) return 0.82;
   const distance = Math.abs(inspectCameraPosition.z - inspectPosition.z);
   const worldHeight = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
   const pixelsPerWorld = viewHeight / Math.max(worldHeight, 0.001);
@@ -2644,7 +2652,7 @@ function applyBookTheme(book) {
   rootStyle.setProperty("--sh-ink", palette.ink);
   rootStyle.setProperty("--sh-ink-soft", palette.inkSoft);
   rootStyle.setProperty("--sh-rule", `color-mix(in srgb, ${palette.ink} 24%, transparent)`);
-  rootStyle.setProperty("--sh-accent", book.foil);
+  rootStyle.setProperty("--sh-accent", book.accent || book.foil);
 
   themeTargets.floor.set(palette.paperDeep);
   themeTargets.wall.set(palette.wall);
@@ -2656,7 +2664,7 @@ function applyBookTheme(book) {
   themeTargets.hemisphereGround.set(palette.shelf);
   themeTargets.key.set(palette.light);
   themeTargets.fill.set(palette.fill);
-  themeTargets.rim.set(book.foil);
+  themeTargets.rim.set(book.accent || book.foil);
 
   if (!themeInitialized || reducedMotion) {
     themeInitialized = true;
@@ -2723,6 +2731,10 @@ function updateSelection(index, announce = false) {
     marker.setAttribute("aria-current", current ? "true" : "false");
     marker.setAttribute("aria-selected", current ? "true" : "false");
     marker.tabIndex = current ? 0 : -1;
+    // จอแคบแถบดัชนีเลื่อนแนวนอน ขีดของเล่มที่เลือกต้องไม่หลุดออกนอกสายตา
+    if (current && markers.scrollWidth > markers.clientWidth + 4) {
+      marker.scrollIntoView({ block: "nearest", inline: "center" });
+    }
   });
 
   if (announce) {
@@ -2816,11 +2828,13 @@ function updatePageControls(announce = false) {
   toggleBookButton.textContent = readingOpen ? "ปิดเล่ม" : "พลิกดูข้างใน";
   toggleBookButton.setAttribute("aria-pressed", String(readingOpen));
   const onePageView = readingOpen && wantsOnePage();
+  // ปุ่มสลับมีความหมายเฉพาะตอนที่ไม่ใช่จอกว้างแนวนอน (ซึ่งกางสองหน้าอยู่แล้ว)
   detailMicrocopy.textContent = !readingOpen
     ? "ลากปกหรือแตะหนึ่งครั้งเพื่อเปิด · ลากพื้นหลังเพื่อหมุนดู"
     : onePageView
       ? "กำลังอ่านทีละหน้าให้ตัวหนังสือใหญ่พอ · ลากหน้ากระดาษเพื่อพลิก"
       : "ลากหน้ากระดาษเพื่อพลิก · ลากปกเพื่อปิด · ลากพื้นหลังเพื่อหมุนดู";
+  detailPanel.classList.toggle("is-reading", readingOpen);
   if (spreadModeButton) {
     spreadModeButton.hidden = !readingOpen;
     spreadModeButton.textContent = onePageView ? "▭ หน้าเดียว" : "▭▭ หน้าคู่";
@@ -3596,6 +3610,57 @@ function onPointerLeave() {
   }
 }
 
+/* ปัดนิ้วเลื่อนชั้นหนังสือ
+   ต้นฉบับใช้ล้อเมาส์กับปุ่มลูกศรเป็นหลัก ซึ่งมือถือไม่มีล้อ และหนังสือ 20 เล่ม
+   หมายถึงกดปุ่มถัดไป 20 ครั้ง — ปัดได้จึงจำเป็น ไม่ใช่ของแถม */
+const shelfDrag = { active: false, pointerId: null, startX: 0, startY: 0, startPosition: 0, moved: false };
+const SHELF_DRAG_SLOP = 10;
+
+function onShelfPointerDown(event) {
+  if (mode !== "hero" || event.button !== 0 || shelfDrag.active) return;
+  shelfDrag.active = true;
+  shelfDrag.pointerId = event.pointerId;
+  shelfDrag.startX = event.clientX;
+  shelfDrag.startY = event.clientY;
+  shelfDrag.startPosition = targetPosition;
+  shelfDrag.moved = false;
+}
+
+function onShelfPointerMove(event) {
+  if (!shelfDrag.active || event.pointerId !== shelfDrag.pointerId) return;
+  const dx = event.clientX - shelfDrag.startX;
+  const dy = event.clientY - shelfDrag.startY;
+  if (!shelfDrag.moved) {
+    // ปัดขึ้นลงปล่อยให้เป็นการเลื่อนหน้าเว็บตามปกติ จับเฉพาะแนวนอน
+    if (Math.abs(dx) < SHELF_DRAG_SLOP || Math.abs(dx) < Math.abs(dy)) return;
+    shelfDrag.moved = true;
+    canvas.setPointerCapture?.(event.pointerId);
+  }
+  // หนึ่งช่วงเล่มกินระยะประมาณ 1 ใน 4 ของความกว้างจอ
+  const perBook = Math.max(90, viewWidth * 0.26);
+  targetPosition = shelfDrag.startPosition - dx / perBook;
+  wheelIdle = 0.14;
+  requestFrame();
+}
+
+function onShelfPointerEnd(event) {
+  if (!shelfDrag.active || (event && event.pointerId !== shelfDrag.pointerId)) return;
+  const moved = shelfDrag.moved;
+  shelfDrag.active = false;
+  shelfDrag.pointerId = null;
+  shelfDrag.moved = false;
+  if (moved) {
+    targetPosition = Math.round(targetPosition);
+    wheelIdle = 0;
+    // กันไม่ให้การปล่อยนิ้วหลังปัด กลายเป็นการแตะเปิดเล่ม
+    suppressShelfClick = true;
+    setTimeout(() => { suppressShelfClick = false; }, 60);
+    requestFrame();
+  }
+}
+
+let suppressShelfClick = false;
+
 function onCanvasClick(event) {
   if (mode === "detail" && !readingOpen && event.button === 0) {
     if (!detailPress.allowClick) return;
@@ -3606,7 +3671,7 @@ function onCanvasClick(event) {
     setReadingOpen(true);
     return;
   }
-  if (mode !== "hero" || event.button !== 0) return;
+  if (mode !== "hero" || event.button !== 0 || suppressShelfClick) return;
   setPointerFromEvent(event);
   const clickedBookIndex = bookIndexAtPointer();
   if (clickedBookIndex < 0) return;
@@ -4071,6 +4136,21 @@ function finishClosing() {
 const readingBox = new THREE.Box3();
 const readingSize = new THREE.Vector3();
 const readingCenter = new THREE.Vector3();
+const pageBox = new THREE.Box3();
+const pageSize = new THREE.Vector3();
+const pageCenter = new THREE.Vector3();
+
+// แผ่นกระดาษที่หงายอยู่ฝั่งที่กำลังอ่าน: ฝั่งขวาคือใบแรกที่ยังไม่ถูกพลิก ฝั่งซ้ายคือใบบนสุดที่พลิกไปแล้ว
+function visiblePageBox(rig) {
+  const leaves = rig.pagePivots.length;
+  let leafOrder = readingFocus > 0 ? currentSpread : currentSpread - 1;
+  if (leafOrder >= PAGINATED_LEAF_COUNT) leafOrder = currentSpread - 1;
+  if (leafOrder < 0) leafOrder = 0;
+  const pivot = rig.pagePivots[leaves - 1 - leafOrder];
+  if (!pivot) return null;
+  pageBox.setFromObject(pivot);
+  return pageBox.isEmpty() ? null : pageBox;
+}
 
 let readingFocus = 1; // 1 = เล็งหน้าขวา, -1 = หน้าซ้าย — ตามทิศที่เพิ่งพลิก
 
@@ -4080,7 +4160,7 @@ let spreadPreference = localStorage.getItem("ebook:shelf3dSpread") || "auto";
 function wantsOnePage() {
   if (spreadPreference === "one") return true;
   if (spreadPreference === "two") return false;
-  return viewWidth < 720 && viewHeight > viewWidth;
+  return viewWidth < 720 && isPortraitLayout();
 }
 
 function setSpreadPreference(value) {
@@ -4093,8 +4173,10 @@ function setSpreadPreference(value) {
 function frameOpenSpread() {
   if (mode !== "detail" || !activeBook || !readingOpen) return false;
   const onePage = wantsOnePage();
-  // จอกว้างที่ไม่ได้สั่งอ่านทีละหน้า ใช้กรอบมาตรฐานข้าง ๆ แผงรายละเอียดตามเดิม
-  if (!onePage && (viewWidth >= 900 || viewHeight <= viewWidth)) return false;
+  // เฉพาะจอกว้างแนวนอนที่ใช้กรอบมาตรฐานข้าง ๆ แผงรายละเอียด
+  // แนวตั้งไม่ว่ากว้างแค่ไหนต้องวัดกรอบเอง ไม่งั้นหนังสือล้นออกนอกจอ
+  const wideLandscape = viewWidth >= 900 && viewWidth > viewHeight;
+  if (!onePage && wideLandscape) return false;
 
   readingBox.setFromObject(activeBook.root);
   if (readingBox.isEmpty()) return false;
@@ -4102,22 +4184,45 @@ function frameOpenSpread() {
   readingBox.getCenter(readingCenter);
 
   /* มือถือแนวตั้ง: สเปรดสองหน้าเล็กจนอ่านไม่ออก เล็งทีละหน้าตามทิศที่พลิกไป
-     ครึ่งหนึ่งของกล่องไม่เท่ากับหนึ่งหน้าพอดี เพราะปกแข็งยื่นเลยขอบกระดาษออกมา
-     จึงเผื่อกรอบไว้ให้กว้างกว่าครึ่ง ไม่งั้นขอบซ้ายของหน้าโดนตัดหาย */
-  const frameWidth = onePage ? readingSize.x * 0.6 : readingSize.x;
-  const centerX = onePage
-    ? readingCenter.x + readingFocus * readingSize.x * 0.21
-    : readingCenter.x;
+     วัดจากแผ่นกระดาษที่กำลังหงายอยู่จริง ไม่ใช่ครึ่งหนึ่งของกล่องทั้งเล่ม
+     เพราะปกแข็งยื่นเลยขอบกระดาษ ครึ่งกล่องจึงไม่เท่ากับหนึ่งหน้า */
+  let frameWidth = readingSize.x;
+  let centerX = readingCenter.x;
+  if (onePage) {
+    const page = visiblePageBox(activeBook);
+    if (page) {
+      page.getSize(pageSize);
+      page.getCenter(pageCenter);
+      frameWidth = pageSize.x;
+      centerX = pageCenter.x;
+    } else {
+      frameWidth = readingSize.x * 0.6;
+      centerX = readingCenter.x + readingFocus * readingSize.x * 0.21;
+    }
+  }
+
+  /* แผงรายละเอียดกินพื้นที่ล่างจอ ถ้าจัดหนังสือกลางจอเต็ม ๆ หน้ากระดาษจะไปกองอยู่
+     หลังแผงครึ่งหนึ่ง — วัดพื้นที่ว่างจริงแล้ววางหนังสือกลางพื้นที่นั้นแทน */
+  const panelTop = detailPanel.getBoundingClientRect().top;
+  const freeBottom = panelTop > 80 ? Math.min(panelTop - 8, viewHeight) : viewHeight;
+  const freeTop = 78; // ใต้แถบเครื่องมือด้านบน (ปุ่มสูง 44px + ระยะขอบ)
+  const freeHeight = Math.max(160, freeBottom - freeTop);
 
   const fovY = THREE.MathUtils.degToRad(camera.fov);
   const fovX = 2 * Math.atan(Math.tan(fovY * 0.5) * camera.aspect);
   const distance = Math.max(
-    (frameWidth * 1.06) / (2 * Math.tan(fovX * 0.5)),
-    (readingSize.y * (onePage ? 1.02 : 1.12)) / (2 * Math.tan(fovY * 0.5))
+    (frameWidth * 1.1) / (2 * Math.tan(fovX * 0.5)),
+    // สูงเท่าพื้นที่ว่าง ไม่ใช่เท่าความสูงจอ จึงต้องถอยกล้องเพิ่มตามสัดส่วน
+    (((onePage ? pageSize.y || readingSize.y : readingSize.y) * 1.08) / (2 * Math.tan(fovY * 0.5)))
+      * (viewHeight / freeHeight)
   );
 
-  controls.target.set(centerX, readingCenter.y, inspectPosition.z);
-  camera.position.set(centerX, readingCenter.y, inspectPosition.z + distance);
+  const worldPerPixel = (2 * distance * Math.tan(fovY * 0.5)) / viewHeight;
+  const centerY = (onePage && pageSize.y ? pageCenter.y : readingCenter.y)
+    - worldPerPixel * (viewHeight * 0.5 - (freeTop + freeBottom) * 0.5);
+
+  controls.target.set(centerX, centerY, inspectPosition.z);
+  camera.position.set(centerX, centerY, inspectPosition.z + distance);
   controls.update();
   requestFrame();
   return true;
@@ -4598,6 +4703,11 @@ async function initialize() {
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerleave", onPointerLeave);
   canvas.addEventListener("click", onCanvasClick);
+  canvas.addEventListener("pointerdown", onShelfPointerDown);
+  canvas.addEventListener("pointermove", onShelfPointerMove);
+  canvas.addEventListener("pointerup", onShelfPointerEnd);
+  canvas.addEventListener("pointercancel", onShelfPointerEnd);
+  canvas.addEventListener("lostpointercapture", onShelfPointerEnd);
   canvas.addEventListener("pointerdown", onDetailBookPointerDown, { capture: true });
   canvas.addEventListener("pointermove", onDetailBookPointerMove, { capture: true });
   canvas.addEventListener("pointerup", onDetailBookPointerEnd, { capture: true });
