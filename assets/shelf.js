@@ -1225,13 +1225,25 @@ function makeInteriorPageTexture(book, spec, folio) {
       drawWrappedCanvasText(ctx, spec.heading, M, 176, COL, size * 1.15, 2);
       y = 250;
     }
-    ctx.globalAlpha = 0.86;
     ctx.font = `400 21px ${SERIF}`;
     spec.lines.forEach((line) => {
+      if (typeof line !== "string") {
+        // รูป/แผนภาพ: จัดกลางคอลัมน์ แล้วเลื่อน y ตามจำนวนบรรทัดที่จองไว้
+        try {
+          ctx.drawImage(line.figure, (PAGE_W - line.w) / 2, y - 12, line.w, line.h);
+        } catch {
+          ctx.globalAlpha = 0.6;
+          ctx.fillText("[ รูปภาพ — ดูในหน้าอ่าน 2D ]", M, y);
+        }
+        ctx.globalAlpha = 1;
+        y += line.rows * TEXT_LINE_H;
+        return;
+      }
+      ctx.globalAlpha = 0.86;
       if (line) ctx.fillText(line, M, y);
+      ctx.globalAlpha = 1;
       y += TEXT_LINE_H;
     });
-    ctx.globalAlpha = 1;
   } else if (spec.kind === "end") {
     drawEyebrow("จบบท", 146);
     ctx.font = `400 30px ${SERIF}`;
@@ -3876,53 +3888,211 @@ function onWheel(event) {
 const PAGE_FACES = PAGINATED_LEAF_COUNT * 2;
 const readingCache = new Map();
 
-/* .md ที่ฝัง HTML ไว้ (callout, ตาราง, รูป) จะเหลือแท็กติดมาถ้าแปลงด้วย regex อย่างเดียว
-   เช็คจากเนื้อไฟล์ด้วย ไม่ใช่ดูแค่นามสกุล เพราะบทที่อัปโหลดเป็น .md อาจเป็น HTML ล้วน */
-function htmlToText(raw) {
-  const doc = new DOMParser().parseFromString(raw, "text/html");
-  doc.querySelectorAll("script, style, head, nav, template").forEach((el) => el.remove());
-  doc.querySelectorAll("pre, code").forEach((el) => {
-    el.textContent = "[ โค้ด — ดูในหน้าอ่าน 2D ]";
+/* เนื้อหาบทถูกแปลงเป็น "บล็อก" ไม่ใช่ข้อความล้วน เพราะรูปกับแผนภาพ mermaid
+   ต้องถูกวาดลงกระดาษจริง ไม่ใช่แทนที่ด้วยป้ายว่ามีรูปอยู่ตรงนี้
+   บล็อกมีสามชนิด: ข้อความ, รูป (ทั้งไฟล์ภาพและ mermaid ที่ถูก render เป็นภาพแล้ว), ป้ายแทนของที่วาดไม่ได้ */
+
+const FIGURE_MAX_H = 430;   // ความสูงสูงสุดของรูปบนหน้ากระดาษ
+const FIGURE_GAP = 18;
+
+function loadImageElement(src, crossOrigin) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.decoding = "async";
+    if (crossOrigin) img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
   });
-  // ทำให้บล็อกกลายเป็นย่อหน้าจริง ไม่งั้น textContent จะติดกันเป็นพืดหมด
-  doc.querySelectorAll("p, div, li, h1, h2, h3, h4, h5, h6, tr, pre, blockquote, br, section, article")
-    .forEach((el) => el.append(document.createTextNode("\n\n")));
-  return (doc.body?.textContent || "").replace(/\n{3,}/g, "\n\n");
 }
 
-/* เชื่อนามสกุลไฟล์เป็นหลัก ดูเนื้อไฟล์เฉพาะตอนที่มันเป็นเอกสาร HTML เต็มใบจริง ๆ
-   บทที่สอน markdown มีตัวอย่างแท็ก HTML อยู่เต็มไปหมด ถ้าเดาจากแท็กจะตีความผิด
-   แล้วไปแปลงด้วย htmlToText ซึ่งไม่รู้จัก ## กับ > ทำให้เครื่องหมาย markdown โผล่บนกระดาษ */
-function looksLikeHtml(raw) {
-  return /^\s*(<!doctype html|<html[\s>])/i.test(raw.slice(0, 400));
+/* รูปข้ามโดเมนที่ไม่มีหัว CORS จะทำให้ canvas "เปื้อน" แล้ว WebGL จะปฏิเสธเท็กซ์เจอร์ทั้งใบ
+   จึงต้องขอแบบ anonymous ก่อน ถ้าเซิร์ฟเวอร์ไม่ยอมก็ยอมแพ้แล้วขึ้นป้ายแทน */
+async function loadFigureImage(src) {
+  const sameOrigin = new URL(src, location.href).origin === location.origin;
+  const img = await loadImageElement(src, !sameOrigin);
+  if (img || sameOrigin) return img;
+  return null;
 }
 
-function markdownToText(src) {
-  return src
+let mermaidReady = null;
+
+function ensureMermaid() {
+  if (mermaidReady) return mermaidReady;
+  mermaidReady = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "assets/mermaid.min.js";
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.append(script);
+  }).then(() => {
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: "neutral",
+      securityLevel: "loose",
+      // ป้ายแบบ HTML อยู่ใน foreignObject ซึ่ง rasterize ลง canvas ไม่ได้ ต้องใช้ text ของ SVG
+      flowchart: { htmlLabels: false },
+      fontFamily: SANS
+    });
+    return window.mermaid;
+  });
+  return mermaidReady;
+}
+
+let mermaidSeq = 0;
+
+async function renderMermaidFigure(code) {
+  try {
+    const mermaid = await ensureMermaid();
+    mermaidSeq += 1;
+    const { svg } = await mermaid.render(`shelf-mermaid-${mermaidSeq}`, code);
+    // data: URL ไม่ทำให้ canvas เปื้อน ต่างจากการโหลด SVG ข้ามโดเมน
+    return await loadImageElement(
+      `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+      false
+    );
+  } catch {
+    return null;
+  }
+}
+
+function textBlock(text) {
+  return { kind: "text", text: text.replace(/\s+/g, " ").trim() };
+}
+
+function markdownToBlocks(src, baseUrl) {
+  const blocks = [];
+  const lines = src
     .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")   // front matter
-    .replace(/```[\s\S]*?```/g, "\n[ โค้ด — ดูในหน้าอ่าน 2D ]\n")
+    .split(/\r?\n/);
+
+  let buffer = [];
+  const flush = () => {
+    const text = cleanMarkdownText(buffer.join("\n"));
+    text.split(/\n\s*\n/).forEach((para) => {
+      const t = para.replace(/\s+/g, " ").trim();
+      if (t) blocks.push({ kind: "text", text: t });
+    });
+    buffer = [];
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const fence = line.match(/^\s*```+\s*([a-zA-Z0-9_-]*)/);
+    if (fence) {
+      flush();
+      const lang = (fence[1] || "").toLowerCase();
+      const body = [];
+      i += 1;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) {
+        body.push(lines[i]);
+        i += 1;
+      }
+      if (lang === "mermaid") blocks.push({ kind: "mermaid", code: body.join("\n") });
+      else blocks.push({ kind: "note", text: "[ โค้ด — ดูในหน้าอ่าน 2D ]" });
+      continue;
+    }
+
+    // รูปที่อยู่บรรทัดเดียวโดด ๆ ถือเป็นบล็อกรูป
+    const solo = line.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)[^)]*\)\s*$/);
+    if (solo) {
+      flush();
+      blocks.push({ kind: "image", src: absoluteUrl(solo[2], baseUrl), alt: solo[1] });
+      continue;
+    }
+
+    buffer.push(line);
+  }
+  flush();
+  return blocks;
+}
+
+function cleanMarkdownText(src) {
+  return src
     .replace(/^\s*\|.*\|\s*$/gm, "")                  // ตาราง
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "\n[ รูปภาพ ]\n")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")             // รูปที่แทรกกลางย่อหน้า
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/`{1,3}[a-z]*\s*/gi, "")
-    // สูตรคณิตเป็นซอร์ส LaTeX ถ้าปล่อยไว้จะเห็นเป็น $\\frac{1}{n}$ กลางหน้ากระดาษ
     .replace(/\$\$[\s\S]*?\$\$/g, " [ สูตรคณิต — ดูในหน้าอ่าน 2D ] ")
     .replace(/\\\[[\s\S]*?\\\]/g, " [ สูตรคณิต — ดูในหน้าอ่าน 2D ] ")
     .replace(/\\\([\s\S]*?\\\)/g, " [ สูตรคณิต ] ")
     .replace(/\$(?!\d)[^$\n]{1,200}\$/g, " [ สูตรคณิต ] ")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/^\s{0,3}>\s?/gm, "")
-    // ทำให้แต่ละข้อในลิสต์เป็นย่อหน้าของตัวเอง ไม่งั้นมันไหลต่อกันเป็นพรืดอ่านไม่ออก
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "\n\n· ")
     .replace(/\*\*|__|~~|\*/g, "")
-    // แท็กที่ฝังมาในไฟล์ markdown ต้องหลุดออกไปด้วย ไม่งั้นขึ้นบนกระดาษเป็น <div ...>
-    // เจาะจงเฉพาะแท็ก HTML จริง ๆ ไม่งั้นข้อความอย่าง "a < b" โดนกินไปด้วย
     .replace(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]{0,300})?\/?>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/\n{3,}/g, "\n\n");
+}
+
+function absoluteUrl(src, baseUrl) {
+  try {
+    return new URL(src, baseUrl || location.href).href;
+  } catch {
+    return src;
+  }
+}
+
+function htmlToBlocks(raw, baseUrl) {
+  const doc = new DOMParser().parseFromString(raw, "text/html");
+  doc.querySelectorAll("script, style, head, nav, template").forEach((el) => el.remove());
+
+  const blocks = [];
+  let buffer = "";
+  const flushText = () => {
+    const t = buffer.replace(/\s+/g, " ").trim();
+    if (t) blocks.push({ kind: "text", text: t });
+    buffer = "";
+  };
+
+  const walk = (node) => {
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        buffer += child.textContent;
+        return;
+      }
+      if (child.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = child.tagName.toLowerCase();
+
+      if (tag === "img") {
+        flushText();
+        const src = child.getAttribute("src");
+        if (src) blocks.push({ kind: "image", src: absoluteUrl(src, baseUrl), alt: child.getAttribute("alt") || "" });
+        return;
+      }
+      if (tag === "pre" || tag === "code") {
+        const cls = child.getAttribute("class") || "";
+        const isMermaid = /(^|\s)(mermaid|language-mermaid)(\s|$)/.test(cls);
+        flushText();
+        if (isMermaid) blocks.push({ kind: "mermaid", code: child.textContent || "" });
+        else if (tag === "pre") blocks.push({ kind: "note", text: "[ โค้ด — ดูในหน้าอ่าน 2D ]" });
+        else buffer += child.textContent;
+        return;
+      }
+      if (/^(p|div|section|article|li|h[1-6]|blockquote|tr|figure|figcaption)$/.test(tag)) {
+        walk(child);
+        flushText();
+        return;
+      }
+      if (tag === "br") {
+        flushText();
+        return;
+      }
+      walk(child);
+    });
+  };
+
+  walk(doc.body || doc);
+  flushText();
+  return blocks;
+}
+
+function looksLikeHtml(raw) {
+  return /^\s*(<!doctype html|<html[\s>])/i.test(raw.slice(0, 400));
 }
 
 async function loadChapterText(book, chapterNo) {
@@ -3934,44 +4104,94 @@ async function loadChapterText(book, chapterNo) {
     const res = await fetch(path);
     if (!res.ok) return null;
     const raw = await res.text();
+    const baseUrl = new URL(path, location.href).href;
     const isMarkdown = /\.md([?#].*)?$/i.test(path);
-    const text = isMarkdown && !looksLikeHtml(raw) ? markdownToText(raw) : htmlToText(raw);
-    const paragraphs = text
-      .split(/\n\s*\n/)
-      .map((para) => para.replace(/\s+/g, " ").trim())
-      .filter(Boolean);
-    return paragraphs.length ? paragraphs : null;
+    const blocks = isMarkdown && !looksLikeHtml(raw)
+      ? markdownToBlocks(raw, baseUrl)
+      : htmlToBlocks(raw, baseUrl);
+
+    /* โหลดรูปและ render mermaid ให้เสร็จก่อนจัดหน้า
+       ถ้าปล่อยเป็น async ระหว่างวาด จะไม่รู้ว่าต้องกันที่ให้รูปสูงเท่าไร */
+    await Promise.all(blocks.map(async (block) => {
+      if (block.kind === "image") block.img = await loadFigureImage(block.src);
+      else if (block.kind === "mermaid") block.img = await renderMermaidFigure(block.code);
+      if (block.kind === "mermaid") block.vector = true;   // SVG ขยายได้ไม่เสียความคม
+      if ((block.kind === "image" || block.kind === "mermaid") && !block.img) {
+        const wasMermaid = block.kind === "mermaid";
+        block.kind = "note";
+        block.text = wasMermaid
+          ? "[ แผนภาพ — ดูในหน้าอ่าน 2D ]"
+          : `[ รูปภาพ${block.alt ? ` — ${block.alt}` : ""} ]`;
+      }
+    }));
+
+    const usable = blocks.filter((b) => (b.kind === "text" || b.kind === "note") ? b.text : true);
+    return usable.length ? usable : null;
   })().catch(() => null);
   readingCache.set(key, job);
   return job;
 }
 
-// ตัดย่อหน้าทั้งบทเป็นบรรทัด แล้วซอยเป็นหน้า ๆ ตามจำนวนบรรทัดที่กระดาษรับได้
-function paginateChapter(paragraphs, chapterNo, chapterTitle) {
+/* ขนาดที่รูปจะถูกวาดบนหน้ากระดาษ
+   ให้กว้างกว่าคอลัมน์ข้อความได้ (กินเข้าไปในขอบกระดาษ) เพราะแผนภาพแนวนอน
+   ถ้าย่อลงเท่าความกว้างคอลัมน์แล้วตัวหนังสือข้างในจะเล็กจนอ่านไม่ออก
+   mermaid เป็น SVG จึงขยายเกินขนาดจริงได้โดยไม่แตก ส่วนไฟล์ภาพห้ามขยาย */
+function figureBox(img, vector) {
+  const maxWidth = PAGE_W - 36;
+  const limit = vector ? 4 : 1;
+  const scale = Math.min(maxWidth / img.naturalWidth, FIGURE_MAX_H / img.naturalHeight, limit);
+  return {
+    w: Math.round(img.naturalWidth * scale),
+    h: Math.round(img.naturalHeight * scale)
+  };
+}
+
+// ตัดบล็อกทั้งบทเป็นหน้า ๆ — บรรทัดข้อความเป็น string ส่วนรูปเป็นอ็อบเจกต์ที่จองความสูงไว้
+function paginateChapter(blocks, chapterNo, chapterTitle) {
   const ctx = document.createElement("canvas").getContext("2d");
   ctx.font = `400 21px ${SERIF}`;
-  const lines = [];
-  paragraphs.forEach((para) => {
-    wrapToWidth(ctx, para, PAGE_COL, 400).forEach((line) => lines.push(line));
-    lines.push("");
+
+  const stream = [];
+  blocks.forEach((block) => {
+    if (block.kind === "image" || block.kind === "mermaid") {
+      const box = figureBox(block.img, block.vector);
+      stream.push({ figure: block.img, w: box.w, h: box.h, rows: Math.ceil((box.h + FIGURE_GAP) / TEXT_LINE_H) });
+      stream.push("");
+      return;
+    }
+    wrapToWidth(ctx, block.text, PAGE_COL, 400).forEach((line) => stream.push(line));
+    stream.push("");
   });
-  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  while (stream.length && stream[stream.length - 1] === "") stream.pop();
 
   const firstPageLines = Math.floor((TEXT_BOTTOM - 250) / TEXT_LINE_H);
   const fullPageLines = Math.floor((TEXT_BOTTOM - TEXT_TOP) / TEXT_LINE_H);
   const pages = [];
   let cursor = 0;
-  while (cursor < lines.length) {
+  while (cursor < stream.length) {
     const first = pages.length === 0;
-    const take = first ? firstPageLines : fullPageLines;
+    const budget = first ? firstPageLines : fullPageLines;
+    const lines = [];
+    let used = 0;
+    while (cursor < stream.length) {
+      const item = stream[cursor];
+      const rows = typeof item === "string" ? 1 : item.rows;
+      // รูปที่สูงเกินหน้าที่เหลือ ให้ยกไปขึ้นหน้าใหม่ทั้งใบ ไม่ตัดครึ่ง
+      if (used + rows > budget) {
+        if (!lines.length && rows > budget) { lines.push(item); cursor += 1; }
+        break;
+      }
+      lines.push(item);
+      used += rows;
+      cursor += 1;
+    }
     pages.push({
       kind: "text",
       chapterNo,
       heading: first ? chapterTitle : null,
       runningHead: `บทที่ ${pad(chapterNo)}`,
-      lines: lines.slice(cursor, cursor + take)
+      lines
     });
-    cursor += take;
   }
   return pages.length ? pages : [{ kind: "text", chapterNo, heading: chapterTitle, lines: [] }];
 }
@@ -4081,17 +4301,17 @@ async function enterReading(rig, chapterNo) {
 
   readingBusy = true;
   updatePageControls(false);
-  const paragraphs = await loadChapterText(book, no);
+  const blocks = await loadChapterText(book, no);
   readingBusy = false;
   // ระหว่างรอโหลด ผู้ใช้อาจปิดเล่มหรือเปลี่ยนไปเล่มอื่นแล้ว
   if (activeBook !== rig) return false;
-  if (!paragraphs) {
+  if (!blocks) {
     renderBrowsePages(rig);
     updatePageControls(false);
     return false;
   }
 
-  const pages = paginateChapter(paragraphs, no, book.chapterTitles[no - 1] || `บทที่ ${no}`);
+  const pages = paginateChapter(blocks, no, book.chapterTitles[no - 1] || `บทที่ ${no}`);
   rig.reading = {
     chapterNo: no,
     title: book.chapterTitles[no - 1] || `บทที่ ${no}`,
