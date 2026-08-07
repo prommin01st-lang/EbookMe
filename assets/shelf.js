@@ -4919,9 +4919,15 @@ function scheduleInspectAssets(rig) {
   if (!rig.assetSteps?.length || rig.assetTimer) return;
   const run = () => {
     rig.assetTimer = 0;
-    const step = rig.assetSteps?.shift();
-    if (!step) return;
-    step();
+    if (!rig.assetSteps?.length) return;
+    // เหมือนคิวหน้ากระดาษ: หนึ่งผืนกิน 30-50ms อย่าไปวาดตอนหนังสือกำลังลอยออกมา
+    rig.assetWaits = (rig.assetWaits || 0) + 1;
+    if (rig.assetWaits < 10 && (mode === "opening" || mode === "closing")) {
+      rig.assetTimer = setTimeout(run, 160);
+      return;
+    }
+    rig.assetWaits = 0;
+    rig.assetSteps.shift()();
     requestFrame();
     scheduleInspectAssets(rig);
   };
