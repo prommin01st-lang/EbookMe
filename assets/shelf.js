@@ -965,6 +965,31 @@ function drawPaperSurface(ctx, width, height, random) {
   }
 }
 
+/* พื้นกระดาษหนึ่งผืนใช้เส้นใย 2,400 เส้นกับจุดฝุ่น 1,200 จุด — สวยแต่แพง
+   หน้าในหนึ่งชุดมีแปดหน้า เท่ากับวาดเส้นใยสองหมื่นเส้นในเฟรมเดียวตอนกางปก
+   วัดได้ 438ms คือภาพค้างกลางแอนิเมชัน จึงวาดพื้นเก็บไว้สามผืนแล้วแปะซ้ำแทน
+   (สามผืนสลับกันไป หน้าติดกันจะได้ไม่ลายเหมือนกันเป๊ะ) */
+let paperBaseCanvases = [];
+let paperBaseKey = "";
+
+function interiorPaperBase(variant) {
+  const key = `${document.documentElement.dataset.theme || "sepia"}-${TEX.page.w}x${TEX.page.h}`;
+  if (paperBaseKey !== key) {
+    paperBaseCanvases = [];
+    paperBaseKey = key;
+  }
+  if (!paperBaseCanvases[variant]) {
+    const canvas = document.createElement("canvas");
+    canvas.width = TEX.page.w;
+    canvas.height = TEX.page.h;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(canvas.width / PAGE_W, canvas.height / PAGE_H);
+    drawPaperSurface(ctx, PAGE_W, PAGE_H, seededRandom(hashSeed(`interior-paper-${variant}`)));
+    paperBaseCanvases[variant] = canvas;
+  }
+  return paperBaseCanvases[variant];
+}
+
 function makePaperFaceTexture(book, printed = false) {
   if (!printed && sharedPaperFaceTexture) return sharedPaperFaceTexture;
 
@@ -1134,7 +1159,10 @@ function makeInteriorPageTexture(book, spec, folio) {
   const ctx = canvas.getContext("2d");
   ctx.scale(canvas.width / PAGE_W, canvas.height / PAGE_H);
   const random = seededRandom(hashSeed(`${book.id}-leaf-${spec.kind}-${folio}`) + book.seed);
-  drawPaperSurface(ctx, PAGE_W, PAGE_H, random);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);   // แปะพื้นในพิกัดจริงของผืนผ้าใบ ไม่ผ่านสเกลของหน้า
+  ctx.drawImage(interiorPaperBase(Math.abs(folio) % 3), 0, 0);
+  ctx.restore();
 
   const ink = readingTheme().ink;
   ctx.fillStyle = ink;
@@ -2737,6 +2765,8 @@ function setThemeColorsImmediately() {
    กระดาษถูกอบเป็นภาพไว้แล้ว จึงต้องวาดใหม่ทั้งชุด ไม่ใช่แค่เปลี่ยนค่าสีวัสดุ */
 function applyReadingTheme() {
   const theme = readingTheme();
+  paperBaseKey = "";
+  paperBaseCanvases = [];
   if (renderer) {
     renderer.toneMappingExposure = theme.exposure;
     renderer.shadowMap.needsUpdate = true;
@@ -2776,7 +2806,7 @@ function applyReadingTheme() {
     activeBook.endpaperMaterial.map = makeEndpaperTexture(activeBook.data);
     activeBook.endpaperMaterial.needsUpdate = true;
     // หน้าที่เห็นอยู่ตอนนี้ต้องวาดใหม่ ไม่ว่ากำลังอ่านหรือแค่เปิดดู
-    if (activeBook.reading) renderReadingBatch(activeBook, activeBook.reading.batch);
+    if (activeBook.reading) renderReadingBatch(activeBook, activeBook.reading.batch, activeBook.reading.folio);
     else if (activeBook.readingTextures?.length) renderBrowsePages(activeBook);
   }
   requestFrame();
@@ -4743,15 +4773,73 @@ function disposeLazyTextures(rig) {
   rig.lazyTextures = [];
 }
 
-function renderReadingBatch(rig, batch) {
-  const book = rig.data;
+// หน้าที่ f ของชุดนี้อยู่ตำแหน่งไหนบนกระดาษ — ใช้เลือกว่าต้องวาดหน้าไหนก่อน
+function faceForFolio(batch, folio) {
+  return wantsOnePage() ? folio - batch * PAGE_FACES : folio - batch * 6 + 1;
+}
+
+function cancelPageJobs(rig) {
+  rig.pageWaits = 0;
+  if (rig.pageTimer) {
+    if (typeof cancelIdleCallback === "function") cancelIdleCallback(rig.pageTimer);
+    else clearTimeout(rig.pageTimer);
+    rig.pageTimer = 0;
+  }
+  rig.pageJobs = null;
+}
+
+function runPageJob(rig, job) {
+  const texture = makeInteriorPageTexture(rig.data, job.spec, job.folio);
+  rig.readingTextures.push(texture);
+  job.material.map = texture;
+  job.material.needsUpdate = true;
+}
+
+function schedulePageJobs(rig) {
+  if (!rig.pageJobs?.length || rig.pageTimer) return;
+  const run = () => {
+    rig.pageTimer = 0;
+    if (!rig.pageJobs?.length) return;
+    /* ห้ามวาดตอนกระดาษยังขยับ — วาดหนึ่งหน้ากิน 25-40ms บนมือถือ ถ้าไปตกกลาง
+       แอนิเมชันกางปกจะเห็นเป็นภาพสะดุด รอให้นิ่งก่อนค่อยวาด แต่ไม่รอเกิน ~1.5 วินาที
+       (หน้าที่จะพลิกไปถึงจริง ๆ มี flushPageFace ดึงขึ้นมาวาดทันทีอยู่แล้ว) */
+    rig.pageWaits = (rig.pageWaits || 0) + 1;
+    if (rig.pageWaits < 8 && (mode === "opening" || mode === "closing" || pageSettling(rig))) {
+      rig.pageTimer = setTimeout(run, 180);
+      return;
+    }
+    rig.pageWaits = 0;
+    runPageJob(rig, rig.pageJobs.shift());
+    requestFrame();
+    schedulePageJobs(rig);
+  };
+  rig.pageTimer = typeof requestIdleCallback === "function"
+    ? requestIdleCallback(run, { timeout: 220 })
+    : setTimeout(run, 40);
+}
+
+// จะพลิกไปหน้านั้นเดี๋ยวนี้ รอคิวไม่ได้
+function flushPageFace(rig, face) {
+  const index = (rig.pageJobs || []).findIndex((job) => job.face === face);
+  if (index < 0) return;
+  runPageJob(rig, rig.pageJobs.splice(index, 1)[0]);
+  requestFrame();
+}
+
+/* กระดาษหนึ่งชุดมีแปดหน้า แต่ตอนกางปกเห็นแค่สองหน้า อีกหกหน้าซ่อนอยู่ใต้กระดาษที่ยังไม่พลิก
+   ของเดิมวาดครบแปดหน้าในเฟรมเดียว = ภาพค้าง 300ms กลางแอนิเมชันกางปก
+   ตอนนี้วาดสองหน้าที่กำลังจะเห็นก่อน ที่เหลือทยอยวาดทีละหน้าในเฟรมว่าง
+   ระหว่างรอ หน้าที่ยังไม่ได้วาดใช้กระดาษเปล่า (ยังไงก็อยู่หลังกระดาษ มองไม่เห็น) */
+function renderReadingBatch(rig, batch, focusFolio = -1) {
   const specs = rig.reading.specs;
   const total = Math.ceil((rig.reading.count || specs.length) / facesPerBatch());
   const next = clamp(batch, 0, total - 1);
   disposeReadingTextures(rig);
+  cancelPageJobs(rig);
   rig.readingTextures = [];
 
   const onePage = wantsOnePage();
+  const jobs = [];
   for (let face = 0; face < PAGE_FACES; face += 1) {
     const material = rig.interiorPageMaterials[face];
     if (!material) continue;
@@ -4759,14 +4847,24 @@ function renderReadingBatch(rig, batch) {
     const used = onePage || (face > 0 && face < PAGE_FACES - 1);
     const folio = used ? folioAt(next, face) : -1;
     const spec = (folio >= 0 && specs[folio]) || { kind: "blank" };
-    const texture = makeInteriorPageTexture(book, spec, folio);
-    rig.readingTextures.push(texture);
-    material.map = texture;
-    material.needsUpdate = true;
+    jobs.push({ face, material, spec, folio });
   }
 
   rig.reading.batch = next;
   rig.reading.batches = total;
+
+  const focusFace = focusFolio >= 0 ? clamp(faceForFolio(next, focusFolio), 0, PAGE_FACES - 1) : 1;
+  jobs.sort((a, b) => Math.abs(a.face - focusFace) - Math.abs(b.face - focusFace));
+  // แนวตั้งเห็นทีละหน้า จึงวาดทันทีแค่หน้าเดียว อีกหน้าอยู่หลังกระดาษ รอคิวได้
+  jobs.splice(0, onePage ? 1 : 2).forEach((job) => runPageJob(rig, job));
+  const blank = sharedPaperFaceTexture;
+  jobs.forEach((job) => {
+    if (!blank) return;
+    job.material.map = blank;
+    job.material.needsUpdate = true;
+  });
+  rig.pageJobs = jobs;
+  schedulePageJobs(rig);
   requestFrame();
 }
 
@@ -4902,7 +5000,7 @@ async function enterReading(rig, chapterNo) {
      ซึ่งเป็นสเปรดที่โหมดหน้าคู่ไม่ได้ใช้ (หน้าซ้ายเป็นใบรองปก หน้าขวาเป็นกระดาษเปล่า)
      จึงต้องพากลับไปหน้าที่ค้างไว้ทุกครั้ง ไม่ใช่ return เฉย ๆ */
   if (rig.reading && rig.reading.chapterNo === no) {
-    renderReadingBatch(rig, Math.floor((rig.reading.folio || 0) / facesPerBatch()));
+    renderReadingBatch(rig, Math.floor((rig.reading.folio || 0) / facesPerBatch()), rig.reading.folio || 0);
     goToFolio(rig.reading.folio || 0, true);
     window.dispatchEvent(new CustomEvent("shelf:reading", { detail: { chapter: no } }));
     return true;
@@ -4955,7 +5053,7 @@ async function enterReading(rig, chapterNo) {
      ปกใน/สารบัญยังพลิกย้อนกลับไปดูได้ */
   const firstText = rig.reading.specs.findIndex((spec) => spec.kind === "text");
   const landing = firstText > 0 ? firstText : 1;
-  renderReadingBatch(rig, 0);
+  renderReadingBatch(rig, 0, landing);
   goToFolio(landing, true);
   updatePageControls(false);
   window.dispatchEvent(new CustomEvent("shelf:reading", { detail: { chapter: no } }));
@@ -5027,9 +5125,10 @@ function goToFolio(folio, snap) {
   const at = positionForFolio(target);
   if (at.batch >= rig.reading.batches) return false;
   if (at.batch !== rig.reading.batch) {
-    renderReadingBatch(rig, at.batch);
+    renderReadingBatch(rig, at.batch, target);
     snap = true;
   }
+  flushPageFace(rig, faceForFolio(at.batch, target));
   currentSpread = at.spread;
   readingFocus = at.side;
   rig.reading.folio = target;
@@ -5075,7 +5174,7 @@ async function relayoutReading() {
   rig.reading.count = specs.count || specs.length;
   rig.reading.batches = Math.ceil(rig.reading.count / facesPerBatch());
   const folio = clamp(Math.round(ratio * (rig.reading.count - 1)), 0, rig.reading.count - 1);
-  renderReadingBatch(rig, Math.floor(folio / facesPerBatch()));
+  renderReadingBatch(rig, Math.floor(folio / facesPerBatch()), folio);
   goToFolio(folio, true);
   updatePageControls(false);
 }
@@ -5286,6 +5385,14 @@ function finishOpening() {
     setReadingOpen(true, false);
   } else {
     closeButton.focus({ preventScroll: true });
+    /* หนังสือมาถึงแล้วและฉากนิ่ง — แอบดึงเนื้อหาบทที่ค้างไว้มาแปลงเก็บรอไว้เลย
+       (readingCache เก็บผลไว้ให้อยู่แล้ว) พอกด "เริ่มอ่าน" จะได้ไม่ต้องมาแปลง
+       markdown/HTML กลางแอนิเมชันกางปก */
+    const rig = activeBook;
+    const chapter = clamp(rig.data.lastChapter || 1, 1, Math.max(1, rig.data.chapterPaths.length));
+    const warm = () => { if (activeBook === rig && !rig.reading) loadChapterText(rig.data, chapter); };
+    if (typeof requestIdleCallback === "function") requestIdleCallback(warm, { timeout: 900 });
+    else setTimeout(warm, 400);
   }
 }
 
@@ -5445,7 +5552,7 @@ function setSpreadPreference(value) {
   if (folio >= 0) {
     const rig = activeBook;
     rig.reading.batches = Math.ceil(rig.reading.count / facesPerBatch());
-    renderReadingBatch(rig, Math.floor(folio / facesPerBatch()));
+    renderReadingBatch(rig, Math.floor(folio / facesPerBatch()), folio);
     goToFolio(folio, true);   // จัดกรอบกล้องให้เองแล้ว
     updatePageControls(false);
     return;
