@@ -39,6 +39,7 @@
   <button class="btn" id="fontUp" title="เพิ่มขนาดตัวอักษร" style="font-size:1.15rem">A+</button>
   <button class="btn" id="fontBtn" title="เลือกฟอนต์">🔤<span class="btn-label"> ฟอนต์</span></button>
   <button class="btn" id="modeBtn" title="สลับโหมดอ่าน (พลิกหน้า/เลื่อนแนวตั้ง)">📄</button>
+  <button class="btn" id="read3dBtn" title="เปิดบทนี้ในหนังสือ 3D">📕<span class="btn-label"> 3D</span></button>
   <button class="btn btn-icon" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
   <button class="btn" id="tocBtn" title="สารบัญ">☰</button>
 </header>
@@ -740,6 +741,22 @@ function syncModeUI() {
 }
 syncModeUI();
 $('modeBtn').addEventListener('click', () => setMode(paged() ? 'scroll' : 'page'));
+
+/* ปุ่มไปอ่านบทเดียวกันในหนังสือ 3D
+   ซ่อนบนเครื่องที่ 3D ใช้ไม่ไหว (จอเล็กมาก หรือผู้ใช้ตั้งลดการเคลื่อนไหวไว้)
+   เพราะกดไปแล้วก็ถูกเด้งกลับมาที่นี่อยู่ดี */
+(function () {
+  const btn = $('read3dBtn');
+  const tiny = Math.min(innerWidth, innerHeight) < 360 || innerWidth < 400;
+  if (tiny || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    btn.hidden = true;
+    return;
+  }
+  btn.addEventListener('click', () => {
+    localStorage.setItem('ebook:readSurface', '3d');
+    location.href = `index.html?book=${encodeURIComponent(bookId)}&ch=${ch}&read3d=1`;
+  });
+})();
 $('modeToggle').addEventListener('change', () => setMode($('modeToggle').checked ? 'page' : 'scroll'));
 
 $('animToggle').checked = localStorage.getItem('ebook:pageAnim') !== '0';

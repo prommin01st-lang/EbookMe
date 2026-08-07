@@ -442,8 +442,9 @@ a:focus-visible {
   right: clamp(26px, 5vw, 78px);
   z-index: 9;
   width: min(34vw, 440px);
-  max-height: 74vh;
+  max-height: 82vh;
   overflow: auto;
+  scrollbar-width: none;
   color: var(--sh-ink);
   opacity: 0;
   transform: translateY(calc(-50% + 18px));
@@ -579,10 +580,68 @@ a:focus-visible {
   letter-spacing: 0.1em;
 }
 
+.chapter-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.chapter-nav .text-button {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 0.7rem;
+}
+
 .detail-controls {
   display: grid;
   gap: 14px;
   margin-top: 20px;
+}
+
+/* ปุ่มย่อรายละเอียด — จอแนวตั้งแผงกินที่ครึ่งจอ หนังสือเลยเหลือนิดเดียว */
+.panel-toggle {
+  position: absolute;
+  top: 7px;
+  right: 57px;
+  display: none;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--sh-ink) 38%, transparent);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sh-ink);
+  cursor: pointer;
+  place-items: center;
+  transition: color 180ms ease, background 180ms ease, transform 260ms var(--sh-ease);
+}
+
+.panel-toggle svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+
+.panel-toggle:hover {
+  color: var(--sh-paper);
+  background: var(--sh-ink);
+}
+
+.detail-panel.is-collapsed .panel-toggle svg {
+  transform: rotate(180deg);
+}
+
+.detail-body {
+  overflow: hidden;
+}
+
+.detail-panel::-webkit-scrollbar {
+  display: none;
 }
 
 .detail-controls .microcopy {
@@ -717,27 +776,77 @@ body:not(.no-webgl) .fallback-note {
     display: none;
   }
 
+  /* แผงรายละเอียดกลายเป็นแผ่นล่างจอที่หุบเก็บได้ */
   .detail-panel {
     top: auto;
-    right: 18px;
-    bottom: max(18px, env(safe-area-inset-bottom));
-    left: 18px;
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    left: 12px;
     width: auto;
-    max-height: 52vh;
-    padding-right: 4px;
+    max-height: 54vh;
+    padding: 12px 14px 14px;
+    border: 1px solid var(--sh-rule);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--sh-paper) 86%, transparent);
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.22);
     transform: translateY(18px);
+    backdrop-filter: blur(14px);
   }
 
   .mode-detail .detail-panel {
     transform: translateY(0);
   }
 
+  .panel-toggle {
+    display: grid;
+  }
+
+  .close-button,
+  .panel-toggle {
+    top: 10px;
+  }
+
+  .eyebrow {
+    margin-right: 104px;
+  }
+
+  .detail-title {
+    max-width: calc(100% - 104px);
+    font-size: clamp(1.5rem, 5.4vw, 2.2rem);
+  }
+
   .detail-deck {
     display: -webkit-box;
     overflow: hidden;
+    margin-top: 12px;
     font-size: 0.95rem;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
+  }
+
+  /* หุบแล้วเหลือแค่ชื่อเรื่องกับปุ่มอ่าน — หนังสือได้ทั้งจอ */
+  .detail-panel.is-collapsed {
+    max-height: none;
+  }
+
+  .detail-panel.is-collapsed .detail-body,
+  .detail-panel.is-collapsed .detail-controls .microcopy {
+    display: none;
+  }
+
+  .detail-panel.is-collapsed .detail-title {
+    overflow: hidden;
+    font-size: 1.25rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detail-panel.is-collapsed .eyebrow {
+    margin-bottom: 6px;
+  }
+
+  .detail-panel.is-collapsed .detail-controls {
+    margin-top: 12px;
   }
 }
 

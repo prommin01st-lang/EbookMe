@@ -98,8 +98,13 @@
     <button class="close-button" id="close-detail" type="button" aria-label="เก็บกลับขึ้นชั้น">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"></path></svg>
     </button>
+    <button class="panel-toggle" id="panel-toggle" type="button" aria-expanded="true"
+            aria-controls="detail-body" aria-label="ย่อ/ขยายรายละเอียด">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 10.5 4.5-4.5 4.5 4.5"></path></svg>
+    </button>
     <p class="eyebrow" id="detail-eyebrow"></p>
     <h2 class="detail-title" id="detail-title"></h2>
+    <div class="detail-body" id="detail-body">
     <p class="detail-deck" id="detail-deck"></p>
     <dl class="meta-list">
       <div>
@@ -131,10 +136,15 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
       </button>
     </div>
+    <div class="chapter-nav">
+      <button class="text-button reset-button" id="chapter-prev" type="button" disabled>‹ บทก่อนหน้า</button>
+      <button class="text-button reset-button" id="chapter-next" type="button" disabled>บทถัดไป ›</button>
+    </div>
+    </div>
     <div class="detail-controls">
       <div class="detail-buttons">
-        <a class="text-button primary" id="read-book" href="#">เริ่มอ่าน</a>
-        <button class="text-button reset-button" id="toggle-book" type="button" aria-pressed="false">พลิกดูข้างใน</button>
+        <button class="text-button primary" id="toggle-book" type="button" aria-pressed="false">อ่านแบบ 3D</button>
+        <a class="text-button" id="read-book" href="#">อ่านแบบ 2D</a>
         <button class="text-button reset-button" id="reset-view" type="button">รีเซ็ตมุมมอง</button>
       </div>
       <p class="microcopy">ลากปกหรือแตะหนึ่งครั้งเพื่อเปิด · ลากพื้นหลังเพื่อหมุนดู</p>
@@ -223,9 +233,68 @@ setView(document.documentElement.dataset.homeView, false);
 document.getElementById('viewBtn').addEventListener('click', () => setView('grid'));
 document.getElementById('viewBackBtn').addEventListener('click', () => setView('shelf'));
 
+/* ---------- อ่าน 3D ↔ 2D ----------
+   จำไว้ว่าครั้งล่าสุดผู้ใช้อ่านแบบไหน แล้วให้ทั้งสองหน้าเปิดโหมดนั้นให้เอง
+   เครื่องที่ไม่ไหวกับ 3D (ไม่มี WebGL / จอเล็กมาก / ผู้ใช้ตั้งลดการเคลื่อนไหว)
+   ถูกดันไปหน้าอ่าน 2D เสมอ เพราะ 3D บนเครื่องแบบนั้นอ่านไม่ไหวจริง ๆ */
+
+const SURFACE_KEY = 'ebook:readSurface';
+
+function canRead3D() {
+  if (document.body.classList.contains('no-webgl')) return false;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  return Math.min(innerWidth, innerHeight) >= 360 && innerWidth >= 400;
+}
+
+const panelEl = document.getElementById('detail-panel');
+const panelToggle = document.getElementById('panel-toggle');
+
+function setPanelCollapsed(collapsed) {
+  panelEl.classList.toggle('is-collapsed', collapsed);
+  panelToggle.setAttribute('aria-expanded', String(!collapsed));
+  localStorage.setItem('ebook:shelfPanel', collapsed ? 'collapsed' : 'open');
+}
+
+panelToggle.addEventListener('click', () => {
+  setPanelCollapsed(!panelEl.classList.contains('is-collapsed'));
+});
+
+// จอแนวตั้งเปิดมาให้หุบไว้ก่อน หนังสือจะได้เต็มจอ เว้นแต่ผู้ใช้เคยกางไว้เอง
+function applyAdaptivePanel() {
+  const portrait = innerHeight > innerWidth && innerWidth <= 900;
+  const saved = localStorage.getItem('ebook:shelfPanel');
+  panelEl.classList.toggle('is-collapsed', saved ? saved === 'collapsed' : portrait);
+  panelToggle.setAttribute('aria-expanded', String(!panelEl.classList.contains('is-collapsed')));
+}
+applyAdaptivePanel();
+
 // ชั้นหนังสือพร้อมหลังสคริปต์นี้ — ถ้าเปิดมาที่มุมมองตาราง ต้องสั่งให้หยุดวาดทันที
 window.addEventListener('shelf:ready', () => {
   window.ebookShelf.setActive(document.body.classList.contains('view-shelf'));
+
+  // มาจากปุ่ม "อ่านแบบ 3D" ในหน้าอ่าน 2D
+  const params = new URLSearchParams(location.search);
+  const bookId = params.get('book');
+  if (!bookId) return;
+  const chapter = parseInt(params.get('ch'), 10) || 1;
+  const wants3D = params.get('read3d') === '1';
+  if (wants3D && !canRead3D()) {
+    location.replace(`reader.html?book=${encodeURIComponent(bookId)}&ch=${chapter}`);
+    return;
+  }
+  setView('shelf', false);
+  window.ebookShelf.setActive(true);
+  if (window.ebookShelf.openBook(bookId, chapter, wants3D) && wants3D) {
+    localStorage.setItem(SURFACE_KEY, '3d');
+  }
+});
+
+// ปุ่มอ่าน 3D จำสถานะไว้ให้หน้าอ่าน 2D รู้ว่าครั้งหน้าควรเสนออะไร
+document.getElementById('toggle-book').addEventListener('click', () => {
+  localStorage.setItem(SURFACE_KEY, window.ebookShelf?.isReading() ? '2d' : '3d');
+});
+document.getElementById('read-book').addEventListener('click', () => {
+  localStorage.setItem(SURFACE_KEY, '2d');
 });
 
 // ไม่มี WebGL ก็ไม่มีชั้น 3D ให้กลับไป

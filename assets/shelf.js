@@ -204,6 +204,7 @@ function buildBooks(catalog) {
       height: 1.42 + random() * 0.22,
       depth: Math.min(0.36, 0.17 + total * 0.007 + random() * 0.03),
       chapterTitles: chapters.map((c, i) => c.title || `บทที่ ${i + 1}`),
+      chapterPaths: chapters.map((c) => c.path),
       chapterCount: total,
       done,
       percent,
@@ -233,6 +234,9 @@ const closeButton = document.querySelector("#close-detail");
 const resetButton = document.querySelector("#reset-view");
 const toggleBookButton = document.querySelector("#toggle-book");
 const readButton = document.querySelector("#read-book");
+const chapterPrevButton = document.querySelector("#chapter-prev");
+const chapterNextButton = document.querySelector("#chapter-next");
+const panelToggle = document.querySelector("#panel-toggle");
 const previousPageButton = document.querySelector("#previous-page");
 const nextPageButton = document.querySelector("#next-page");
 const pageLabel = document.querySelector("#page-label");
@@ -286,6 +290,9 @@ let activeBook = null;
 let readingOpen = false;
 let detailBookHovered = false;
 let currentSpread = 0;
+let snapPages = false;     // ตัดภาพหน้ากระดาษทันที ไม่ต้องพลิก (ตอนข้ามชุดหน้า)
+let readingBusy = false;   // กำลังดึงเนื้อหาบทมาวาดลงกระดาษ
+let pendingReadChapter = 0; // มาจาก ?read3d= — เปิดอ่านทันทีเมื่อหนังสือถึงมือ
 let pointerDirty = false;
 let suspended = false;
 let viewWidth = window.innerWidth;
@@ -1025,190 +1032,219 @@ function makeEndpaperTexture(book) {
   return texture;
 }
 
-function makeInteriorPageTextures(book) {
-  const pageCount = 8;
-  const inkColor = new THREE.Color(book.color).lerp(new THREE.Color(0x211b16), 0.62);
-  const ink = `#${inkColor.getHexString()}`;
+/* หน้ากระดาษข้างในเล่ม
+   ต้นฉบับวาดหน้าไว้ตายตัว 8 หน้าเป็นข้อความสมมติ ของเราวาดจาก "สเปก" ทีละหน้า
+   เพราะโหมดอ่าน 3D ต้องเปลี่ยนเนื้อหาบนกระดาษใบเดิมไปเรื่อย ๆ ตามหน้าที่อ่านถึง */
 
-  return Array.from({ length: pageCount }, (_, pageIndex) => {
-    const canvas = document.createElement("canvas");
-    const logicalWidth = 512;
-    const logicalHeight = 768;
-    canvas.width = 384;
-    canvas.height = 576;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(0.75, 0.75);
-    const random = seededRandom(hashSeed(`${book.id}-leaf-${pageIndex}`) + book.seed);
-    drawPaperSurface(ctx, logicalWidth, logicalHeight, random);
-    ctx.fillStyle = ink;
-    ctx.strokeStyle = ink;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
+const PAGE_W = 512;
+const PAGE_H = 768;
+const PAGE_M = 54;
+const PAGE_COL = PAGE_W - PAGE_M * 2;
+const TOC_PER_PAGE = 11;
+const TEXT_LINE_H = 30;
+const TEXT_TOP = 190;
+const TEXT_BOTTOM = 704;
 
-    const M = 54;
-    const COL = logicalWidth - M * 2;
-    const titles = book.chapterTitles;
-    // ถ้าบทเยอะ สารบัญกินสองหน้า ถ้าน้อยหน้าที่สองเปลี่ยนเป็นแผ่นลาย
-    const tocPerPage = 11;
-    const tocSecondPage = titles.length > tocPerPage;
+function makeInteriorPageTexture(book, spec, folio) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 384;
+  canvas.height = 576;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(0.75, 0.75);
+  const random = seededRandom(hashSeed(`${book.id}-leaf-${spec.kind}-${folio}`) + book.seed);
+  drawPaperSurface(ctx, PAGE_W, PAGE_H, random);
 
+  const ink = `#${new THREE.Color(book.color).lerp(new THREE.Color(0x211b16), 0.62).getHexString()}`;
+  ctx.fillStyle = ink;
+  ctx.strokeStyle = ink;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+
+  const M = PAGE_M;
+  const COL = PAGE_COL;
+  const titles = book.chapterTitles;
+
+  const drawEyebrow = (text, y) => {
+    ctx.font = `500 11px ${SANS}`;
+    ctx.letterSpacing = "2px";
+    ctx.fillText(text, M, y);
+    ctx.letterSpacing = "0px";
+  };
+
+  if (spec.kind !== "blank") {
     ctx.globalAlpha = 0.58;
     ctx.font = `500 10px ${SANS}`;
     ctx.letterSpacing = "1.8px";
-    ctx.fillText(`EBOOKME  /  ${book.roman}`, 48, 48);
+    ctx.fillText(spec.runningHead || `EBOOKME  /  ${book.roman}`, 48, 48);
     ctx.textAlign = "right";
-    ctx.fillText(pad(pageIndex + 1), logicalWidth - 48, 48);
+    ctx.fillText(pad(folio + 1), PAGE_W - 48, 48);
     ctx.textAlign = "left";
     ctx.letterSpacing = "0px";
-    ctx.fillRect(48, 64, logicalWidth - 96, 1);
+    ctx.fillRect(48, 64, PAGE_W - 96, 1);
     ctx.globalAlpha = 1;
+  }
 
-    const drawEyebrow = (text, y) => {
+  if (spec.kind === "title") {
+    drawEyebrow(book.discipline, 174);
+    const size = fitFontSize(ctx, book.title, COL, 400, SERIF, 58, 26, 2);
+    ctx.font = `400 ${size}px ${SERIF}`;
+    drawWrappedCanvasText(ctx, book.title, M - 2, 246, COL, size * 1.1, 2);
+    ctx.globalAlpha = 0.55;
+    ctx.font = `400 22px ${SERIF}`;
+    drawWrappedCanvasText(ctx, book.deck, M, 462, COL, 32, 5);
+    ctx.globalAlpha = 1;
+  } else if (spec.kind === "toc") {
+    const from = spec.from;
+    drawEyebrow(from === 0 ? `ทั้งหมด ${book.chapterCount} บท` : "สารบัญ (ต่อ)", 138);
+    ctx.font = `400 34px ${SERIF}`;
+    if (from === 0) ctx.fillText("สารบัญ", M, 186);
+    let y = from === 0 ? 246 : 190;
+    titles.slice(from, from + TOC_PER_PAGE).forEach((title, i) => {
+      const no = from + i + 1;
+      const read = no <= book.done;
+      ctx.globalAlpha = read ? 0.9 : 0.55;
+      ctx.font = `500 13px ${SANS}`;
+      ctx.fillText(pad(no), M, y);
+      ctx.font = `400 18px ${SERIF}`;
+      const line = wrapToWidth(ctx, title, COL - 46, 1)[0] || "";
+      ctx.fillText(line, M + 40, y);
+      if (read) {
+        ctx.globalAlpha = 0.45;
+        ctx.fillRect(M + 40, y + 5, ctx.measureText(line).width, 1);
+      }
+      y += 40;
+    });
+    ctx.globalAlpha = 1;
+  } else if (spec.kind === "progress") {
+    drawEyebrow("ความคืบหน้า", 146);
+    ctx.font = `400 92px ${SERIF}`;
+    ctx.fillText(`${book.percent}%`, M, 250);
+    ctx.globalAlpha = 0.55;
+    ctx.font = `400 20px ${SERIF}`;
+    ctx.fillText(`อ่านแล้ว ${book.done} จาก ${book.chapterCount} บท`, M, 292);
+    ctx.globalAlpha = 0.28;
+    ctx.fillRect(M, 330, COL, 10);
+    ctx.globalAlpha = 0.85;
+    ctx.fillRect(M, 330, (COL * book.percent) / 100, 10);
+    // ตารางบทแบบจุด — บทที่อ่านแล้วทึบ ที่เหลือโปร่ง
+    const dot = 22;
+    const perRow = Math.floor(COL / dot);
+    titles.forEach((_, i) => {
+      ctx.globalAlpha = i < book.done ? 0.85 : 0.2;
+      ctx.beginPath();
+      ctx.arc(M + 7 + (i % perRow) * dot, 400 + Math.floor(i / perRow) * dot, 6, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 0.48;
+    ctx.font = `400 17px ${SERIF}`;
+    ctx.fillText(book.theme, M, 700);
+    ctx.globalAlpha = 1;
+  } else if (spec.kind === "motif") {
+    drawEyebrow("แผ่นลายประจำเล่ม", 146);
+    ctx.save();
+    ctx.globalAlpha = 0.58;
+    drawMotif(ctx, { ...book, foil: ink }, PAGE_W, PAGE_H * 0.92);
+    ctx.restore();
+    ctx.globalAlpha = 0.48;
+    ctx.font = `400 17px ${SERIF}`;
+    drawWrappedCanvasText(ctx, spec.caption || book.theme, M, 650, COL, 24, 3);
+    ctx.globalAlpha = 1;
+  } else if (spec.kind === "notes") {
+    drawEyebrow("บันทึกของผู้อ่าน", 138);
+    ctx.globalAlpha = 0.44;
+    for (let column = 0; column < 2; column += 1) {
+      const left = M + column * 214;
+      for (let line = 0; line < 24; line += 1) {
+        const width = line % 7 === 6 ? 72 + random() * 54 : 138 + random() * 44;
+        ctx.fillRect(left, 190 + line * 18, width, 1.25);
+      }
+    }
+    ctx.globalAlpha = 0.78;
+    ctx.strokeRect(M, 654, 404, 54);
+    ctx.font = `500 12px ${SANS}`;
+    ctx.fillText(book.motif, M + 16, 686);
+    ctx.globalAlpha = 1;
+  } else if (spec.kind === "text") {
+    let y = TEXT_TOP;
+    if (spec.heading) {
       ctx.font = `500 11px ${SANS}`;
       ctx.letterSpacing = "2px";
-      ctx.fillText(text, M, y);
+      ctx.fillText(`บทที่ ${spec.chapterNo}`, M, 132);
       ctx.letterSpacing = "0px";
-    };
-
-    const drawTocPage = (from) => {
-      drawEyebrow(from === 0 ? `ทั้งหมด ${book.chapterCount} บท` : "สารบัญ (ต่อ)", 138);
-      ctx.font = `400 34px ${SERIF}`;
-      if (from === 0) ctx.fillText("สารบัญ", M, 186);
-      let y = from === 0 ? 246 : 190;
-      titles.slice(from, from + tocPerPage).forEach((title, i) => {
-        const no = from + i + 1;
-        const read = no <= book.done;
-        ctx.globalAlpha = read ? 0.9 : 0.55;
-        ctx.font = `500 13px ${SANS}`;
-        ctx.fillText(pad(no), M, y);
-        ctx.font = `400 18px ${SERIF}`;
-        const line = wrapToWidth(ctx, title, COL - 46, 1)[0] || "";
-        ctx.fillText(line, M + 40, y);
-        if (read) {
-          ctx.globalAlpha = 0.45;
-          ctx.fillRect(M + 40, y + 5, ctx.measureText(line).width, 1);
-        }
-        y += 40;
-      });
-      ctx.globalAlpha = 1;
-    };
-
-    const drawMotifPlate = (caption) => {
-      drawEyebrow("แผ่นลายประจำเล่ม", 146);
-      ctx.save();
-      ctx.globalAlpha = 0.58;
-      drawMotif(ctx, { ...book, foil: ink }, logicalWidth, logicalHeight * 0.92);
-      ctx.restore();
-      ctx.globalAlpha = 0.48;
-      ctx.font = `400 17px ${SERIF}`;
-      drawWrappedCanvasText(ctx, caption, M, 650, COL, 24, 3);
-      ctx.globalAlpha = 1;
-    };
-
-    if (pageIndex === 0) {
-      drawEyebrow(book.discipline, 174);
-      const size = fitFontSize(ctx, book.title, COL, 400, SERIF, 58, 26, 2);
+      const size = fitFontSize(ctx, spec.heading, COL, 400, SERIF, 34, 17, 2);
       ctx.font = `400 ${size}px ${SERIF}`;
-      drawWrappedCanvasText(ctx, book.title, M - 2, 246, COL, size * 1.1, 2);
-      ctx.globalAlpha = 0.55;
-      ctx.font = `400 22px ${SERIF}`;
-      drawWrappedCanvasText(ctx, book.deck, M, 462, COL, 32, 5);
-      ctx.globalAlpha = 1;
-    } else if (pageIndex === 1) {
-      drawTocPage(0);
-    } else if (pageIndex === 2) {
-      if (tocSecondPage) drawTocPage(tocPerPage);
-      else drawMotifPlate(book.theme);
-    } else if (pageIndex === 3) {
-      drawEyebrow("ความคืบหน้า", 146);
-      ctx.font = `400 92px ${SERIF}`;
-      ctx.fillText(`${book.percent}%`, M, 250);
-      ctx.globalAlpha = 0.55;
-      ctx.font = `400 20px ${SERIF}`;
-      ctx.fillText(`อ่านแล้ว ${book.done} จาก ${book.chapterCount} บท`, M, 292);
-      ctx.globalAlpha = 0.28;
-      ctx.fillRect(M, 330, COL, 10);
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(M, 330, (COL * book.percent) / 100, 10);
-      ctx.globalAlpha = 0.5;
-      // ตารางบทแบบจุด — บทที่อ่านแล้วทึบ ที่เหลือโปร่ง
-      const dot = 22;
-      const perRow = Math.floor(COL / dot);
-      titles.forEach((_, i) => {
-        ctx.globalAlpha = i < book.done ? 0.85 : 0.2;
-        ctx.beginPath();
-        ctx.arc(M + 7 + (i % perRow) * dot, 400 + Math.floor(i / perRow) * dot, 6, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      ctx.globalAlpha = 0.48;
-      ctx.font = `400 17px ${SERIF}`;
-      ctx.fillText(book.theme, M, 700);
-      ctx.globalAlpha = 1;
-    } else if (pageIndex === 4) {
-      const current = Math.max(1, book.lastChapter || 1);
-      drawEyebrow(`บทที่ ${pad(current)}`, 166);
-      const title = titles[current - 1] || "ยังไม่มีบท";
-      const size = fitFontSize(ctx, title, COL, 400, SERIF, 49, 24, 3);
-      ctx.font = `400 ${size}px ${SERIF}`;
-      drawWrappedCanvasText(ctx, title, M - 2, 244, COL, size * 1.1, 3);
-      ctx.globalAlpha = 0.44;
-      for (let line = 0; line < 12; line += 1) {
-        const width = line % 5 === 4 ? 150 + random() * 90 : COL - random() * 40;
-        ctx.fillRect(M, 452 + line * 22, width, 1.25);
-      }
-      ctx.globalAlpha = 1;
-    } else if (pageIndex === 5) {
-      drawMotifPlate(book.deck);
-    } else if (pageIndex === 6) {
-      drawEyebrow("บันทึกของผู้อ่าน", 138);
-      ctx.globalAlpha = 0.44;
-      for (let column = 0; column < 2; column += 1) {
-        const left = M + column * 214;
-        for (let line = 0; line < 24; line += 1) {
-          const width = line % 7 === 6 ? 72 + random() * 54 : 138 + random() * 44;
-          ctx.fillRect(left, 190 + line * 18, width, 1.25);
-        }
-      }
-      ctx.globalAlpha = 0.78;
-      ctx.strokeRect(M, 654, 404, 54);
-      ctx.font = `500 12px ${SANS}`;
-      ctx.fillText(book.motif, M + 16, 686);
-      ctx.globalAlpha = 1;
-    } else {
-      drawEyebrow("ท้ายเล่ม", 164);
-      ctx.font = `54px "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
-      ctx.fillText(book.cover, M, 236);
-      const size = fitFontSize(ctx, book.title, COL - 90, 400, SERIF, 32, 18, 2);
-      ctx.font = `400 ${size}px ${SERIF}`;
-      drawWrappedCanvasText(ctx, book.title, M + 84, 230, COL - 90, size * 1.15, 2);
-      ctx.globalAlpha = 0.58;
-      ctx.font = `400 18px ${SERIF}`;
-      drawWrappedCanvasText(
-        ctx,
-        `เข้าเล่ม ${book.binding} · ${book.discipline} · ${book.format}`,
-        M,
-        306,
-        COL,
-        28,
-        5
-      );
-      ctx.globalAlpha = 0.74;
-      ctx.font = `500 11px ${SANS}`;
-      ctx.letterSpacing = "1.8px";
-      ctx.fillText(`EBOOKME ${book.roman}  ·  ${book.cloud ? "คลาวด์" : "ในเครื่อง"}`, M, 676);
-      ctx.letterSpacing = "0px";
-      ctx.globalAlpha = 1;
+      drawWrappedCanvasText(ctx, spec.heading, M, 176, COL, size * 1.15, 2);
+      y = 250;
     }
-
-    ctx.globalAlpha = 0.62;
-    ctx.fillRect(48, logicalHeight - 48, logicalWidth - 96, 1);
-    ctx.globalAlpha = 1;
-    const texture = configureCanvasTexture(new THREE.CanvasTexture(canvas), {
-      anisotropy: 16
+    ctx.globalAlpha = 0.86;
+    ctx.font = `400 21px ${SERIF}`;
+    spec.lines.forEach((line) => {
+      if (line) ctx.fillText(line, M, y);
+      y += TEXT_LINE_H;
     });
-    texture.name = `${book.id}-interior-page-${pageIndex + 1}`;
-    return texture;
-  });
+    ctx.globalAlpha = 1;
+  } else if (spec.kind === "end") {
+    drawEyebrow("จบบท", 146);
+    ctx.font = `400 30px ${SERIF}`;
+    drawWrappedCanvasText(ctx, spec.heading || "จบบทนี้แล้ว", M, 210, COL, 38, 3);
+    ctx.globalAlpha = 0.55;
+    ctx.font = `400 19px ${SERIF}`;
+    drawWrappedCanvasText(ctx, spec.note || "", M, 340, COL, 28, 4);
+    ctx.globalAlpha = 1;
+  } else if (spec.kind === "colophon") {
+    drawEyebrow("ท้ายเล่ม", 164);
+    ctx.font = `54px "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+    ctx.fillText(book.cover, M, 236);
+    const size = fitFontSize(ctx, book.title, COL - 90, 400, SERIF, 32, 18, 2);
+    ctx.font = `400 ${size}px ${SERIF}`;
+    drawWrappedCanvasText(ctx, book.title, M + 84, 230, COL - 90, size * 1.15, 2);
+    ctx.globalAlpha = 0.58;
+    ctx.font = `400 18px ${SERIF}`;
+    drawWrappedCanvasText(
+      ctx,
+      `เข้าเล่ม ${book.binding} · ${book.discipline} · ${book.format}`,
+      M,
+      306,
+      COL,
+      28,
+      5
+    );
+    ctx.globalAlpha = 0.74;
+    ctx.font = `500 11px ${SANS}`;
+    ctx.letterSpacing = "1.8px";
+    ctx.fillText(`EBOOKME ${book.roman}  ·  ${book.cloud ? "คลาวด์" : "ในเครื่อง"}`, M, 676);
+    ctx.letterSpacing = "0px";
+    ctx.globalAlpha = 1;
+  }
+
+  if (spec.kind !== "blank") {
+    ctx.globalAlpha = 0.62;
+    ctx.fillRect(48, PAGE_H - 48, PAGE_W - 96, 1);
+    ctx.globalAlpha = 1;
+  }
+
+  const texture = configureCanvasTexture(new THREE.CanvasTexture(canvas), { anisotropy: 16 });
+  texture.name = `${book.id}-page-${folio + 1}-${spec.kind}`;
+  return texture;
+}
+
+// หน้าตั้งต้นก่อนโหลดเนื้อหาจริง — เป็นสิ่งที่เห็นตอนแค่หยิบมาพลิกดูเฉย ๆ
+function browsePageSpecs(book) {
+  const hasSecondToc = book.chapterTitles.length > TOC_PER_PAGE;
+  return [
+    { kind: "title" },
+    { kind: "toc", from: 0 },
+    hasSecondToc ? { kind: "toc", from: TOC_PER_PAGE } : { kind: "motif", caption: book.theme },
+    { kind: "progress" },
+    { kind: "motif", caption: book.deck },
+    { kind: "notes" },
+    { kind: "motif", caption: book.theme },
+    { kind: "colophon" }
+  ];
+}
+
+function makeInteriorPageTextures(book) {
+  return browsePageSpecs(book).map((spec, index) => makeInteriorPageTexture(book, spec, index));
 }
 
 function makeContactShadowTexture() {
@@ -2228,6 +2264,7 @@ function createBookRig(book, index) {
     clothSurfaceMaps,
     paperFaceTexture,
     interiorPageTextures,
+    interiorPageMaterials,
     endpaperTexture,
     pageEdgeTextures,
     spineTexture,
@@ -2692,6 +2729,15 @@ function updateSelection(index, announce = false) {
   }
 }
 
+function refreshProgress(book) {
+  const total = book.chapterCount;
+  book.done = readDoneCount(book.id, total);
+  book.percent = total ? Math.round((book.done / total) * 100) : 0;
+  book.lastChapter = readLastChapter(book.id, total);
+  book.format = total ? `อ่านแล้ว ${book.done}/${total} บท (${book.percent}%)` : "ยังไม่มีบท";
+  book.theme = book.lastChapter ? `ค้างไว้ที่บทที่ ${book.lastChapter}` : "ยังไม่เคยเปิดอ่าน";
+}
+
 function populateDetail(book) {
   detailEyebrow.textContent = `เล่มที่ ${book.roman} · ${book.discipline}`;
   detailTitle.textContent = book.title;
@@ -2707,28 +2753,73 @@ function populateDetail(book) {
 }
 
 function getSpreadLabels(book) {
-  const toc = book.chapterTitles.length > 11 ? "สารบัญ (ต่อ)" : "แผ่นลาย";
-  return ["ปกใน", `สารบัญ · ${toc}`, "ความคืบหน้า · บทที่ค้าง", "แผ่นลาย · บันทึก", "ท้ายเล่ม"];
+  const reading = activeBook?.data === book ? activeBook.reading : null;
+  if (reading) {
+    const specs = reading.specs;
+    const base = reading.batch * PAGE_FACES;
+    return Array.from({ length: SPREAD_COUNT }, (_, spread) => {
+      const face = spread === 0
+        ? 0
+        : spread === SPREAD_COUNT - 1
+          ? PAGE_FACES - 1
+          : spread * 2;
+      const spec = specs[base + face];
+      if (!spec || spec.kind === "blank") return reading.title;
+      if (spec.kind === "toc") return "สารบัญ";
+      if (spec.kind === "title") return "ปกใน";
+      if (spec.kind === "progress") return "ความคืบหน้า";
+      if (spec.kind === "end") return `จบบทที่ ${reading.chapterNo}`;
+      if (spec.kind === "colophon") return "ท้ายเล่ม";
+      return reading.title;
+    });
+  }
+  const toc = book.chapterTitles.length > TOC_PER_PAGE ? "สารบัญ (ต่อ)" : "แผ่นลาย";
+  return ["ปกใน", `สารบัญ · ${toc}`, "ความคืบหน้า", "แผ่นลาย · บันทึก", "ท้ายเล่ม"];
 }
 
 function updatePageControls(announce = false) {
-  const book = activeBook?.data || BOOKS[selectedIndex];
+  const rig = activeBook;
+  const book = rig?.data || BOOKS[selectedIndex];
+  const reading = rig?.reading;
   const labels = getSpreadLabels(book);
   const interactionLocked = mode !== "detail" || !readingOpen;
-  const previousDisabled = interactionLocked || currentSpread === 0;
-  const nextDisabled = interactionLocked || currentSpread === SPREAD_COUNT - 1;
+  const atFirst = currentSpread === 0 && (reading ? reading.batch === 0 : true);
+  const atLast = currentSpread === SPREAD_COUNT - 1
+    && (reading ? reading.batch >= reading.batches - 1 : true);
+  const previousDisabled = interactionLocked || atFirst;
+  const nextDisabled = interactionLocked || atLast;
 
   previousPageButton.disabled = previousDisabled;
   nextPageButton.disabled = nextDisabled;
-  pageLabel.textContent = readingOpen ? labels[currentSpread] : "ปิดอยู่";
-  pageCounter.textContent = readingOpen
-    ? `${pad(currentSpread + 1)} / ${pad(SPREAD_COUNT)}`
-    : "แตะที่หนังสือเพื่อเปิด";
+
+  if (chapterPrevButton && chapterNextButton) {
+    const chapterNo = reading?.chapterNo || 0;
+    chapterPrevButton.disabled = !reading || chapterNo <= 1;
+    chapterNextButton.disabled = !reading || chapterNo >= book.chapterCount;
+  }
+
+  pageLabel.textContent = readingOpen
+    ? (readingBusy ? "กำลังดึงเนื้อหา…" : labels[currentSpread])
+    : "ปิดอยู่";
+  if (readingOpen && reading) {
+    const [from, to] = readingFolioRange();
+    const total = reading.specs.length;
+    pageCounter.textContent = from === to
+      ? `หน้า ${from + 1} / ${total}`
+      : `หน้า ${from + 1}–${to + 1} / ${total}`;
+  } else {
+    pageCounter.textContent = readingOpen
+      ? `${pad(currentSpread + 1)} / ${pad(SPREAD_COUNT)}`
+      : "แตะที่หนังสือเพื่อเปิด";
+  }
   toggleBookButton.textContent = readingOpen ? "ปิดเล่ม" : "พลิกดูข้างใน";
   toggleBookButton.setAttribute("aria-pressed", String(readingOpen));
-  detailMicrocopy.textContent = readingOpen
-    ? "ลากหน้ากระดาษเพื่อพลิก · ลากปกเพื่อปิด · ลากพื้นหลังเพื่อหมุนดู"
-    : "ลากปกหรือแตะหนึ่งครั้งเพื่อเปิด · ลากพื้นหลังเพื่อหมุนดู";
+  const onePageView = readingOpen && viewWidth < 720 && viewHeight > viewWidth;
+  detailMicrocopy.textContent = !readingOpen
+    ? "ลากปกหรือแตะหนึ่งครั้งเพื่อเปิด · ลากพื้นหลังเพื่อหมุนดู"
+    : onePageView
+      ? "จอแนวตั้งอ่านทีละหน้าให้ตัวหนังสือใหญ่พอ — หมุนจอเป็นแนวนอนเพื่อดูสองหน้าคู่"
+      : "ลากหน้ากระดาษเพื่อพลิก · ลากปกเพื่อปิด · ลากพื้นหลังเพื่อหมุนดู";
   previousPageButton.setAttribute(
     "aria-label",
     previousDisabled ? "หน้าก่อนหน้า" : `หน้าก่อนหน้า: ${labels[currentSpread - 1]}`
@@ -2748,6 +2839,15 @@ function setReadingOpen(open, announce = true) {
   cancelPageDrag();
   readingOpen = open;
   if (!readingOpen) currentSpread = 0;
+  // เปิดเล่มเมื่อไหร่ค่อยไปดึงเนื้อหาบทมาวาด ไม่ต้องโหลดตั้งแต่ตอนเลื่อนดูบนชั้น
+  if (readingOpen && activeBook) {
+    enterReading(activeBook, activeBook.data.lastChapter || 1);
+    setTimeout(frameOpenSpread, 700); // รอปกกางสุดก่อนค่อยวัดขนาด
+  } else {
+    camera.position.copy(inspectCameraPosition);
+    controls.target.copy(inspectCameraTarget);
+    controls.update();
+  }
   canvas.classList.remove("has-page-hover", "has-closed-book-hover");
   updatePageControls(false);
   pointerDirty = true;
@@ -2762,15 +2862,17 @@ function setReadingOpen(open, announce = true) {
 
 function turnPage(direction) {
   if (mode !== "detail" || !readingOpen) return;
-  const nextSpread = clamp(
-    currentSpread + direction,
-    0,
-    SPREAD_COUNT - 1
-  );
-  if (nextSpread === currentSpread) return;
+  const nextSpread = currentSpread + direction;
+  // สุดชุดแล้วยังพลิกต่อ = ข้ามไปอีก 8 หน้าถัดไปของบทเดียวกัน
+  if (nextSpread < 0 || nextSpread >= SPREAD_COUNT) {
+    shiftReadingBatch(direction);
+    return;
+  }
   currentSpread = nextSpread;
+  readingFocus = direction > 0 ? 1 : -1;
   updatePageControls(true);
   requestFrame();
+  setTimeout(frameOpenSpread, 420); // รอกระดาษพลิกจบก่อนค่อยเลื่อนกล้อง
 }
 
 function updateFlexiblePage(
@@ -2882,7 +2984,7 @@ function updateFlexiblePage(
 
 function updatePaginatedBook(rig, delta, openAmount = 1) {
   const amount = clamp(openAmount, 0, 1);
-  const speed = reducedMotion ? 1000 : 10.5;
+  const speed = (reducedMotion || snapPages) ? 1000 : 10.5;
   const hoverCrack = (
     mode === "detail"
     && !readingOpen
@@ -3514,6 +3616,202 @@ function onWheel(event) {
   requestFrame();
 }
 
+/* ---------- โหมดอ่านแบบ 3D ----------
+   หนังสือมีกระดาษจริงแค่ 4 ใบ (8 หน้า) แต่บทหนึ่งยาวหลายสิบหน้า
+   จึงทำเป็น "ชุดละ 8 หน้า" แล้วเปลี่ยนภาพบนกระดาษใบเดิมเมื่ออ่านข้ามชุด
+   ภายในชุดเดียวกันพลิกได้ลื่นเหมือนหนังสือจริง ข้ามชุดถึงจะตัดภาพทีเดียว
+
+   ข้อจำกัดที่ควรรู้: ตัวหนังสือถูกอบเป็นภาพลงกระดาษ จึงเลือก/คัดลอก/ค้นหาไม่ได้
+   และโค้ด สูตรคณิต แผนภาพ mermaid จะไม่ถูกวาด — งานพวกนี้ต้องใช้หน้าอ่าน 2D */
+
+const PAGE_FACES = PAGINATED_LEAF_COUNT * 2;
+const readingCache = new Map();
+
+function markdownToText(src) {
+  return src
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")   // front matter
+    .replace(/```[\s\S]*?```/g, "\n[ โค้ด — ดูในหน้าอ่าน 2D ]\n")
+    .replace(/^\s*\|.*\|\s*$/gm, "")                  // ตาราง
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "\n[ รูปภาพ ]\n")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "· ")
+    .replace(/\*\*|__|~~|\*/g, "")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+async function loadChapterText(book, chapterNo) {
+  const key = `${book.id}#${chapterNo}`;
+  if (readingCache.has(key)) return readingCache.get(key);
+  const job = (async () => {
+    const path = book.chapterPaths[chapterNo - 1];
+    if (!path) return null;
+    const res = await fetch(path);
+    if (!res.ok) return null;
+    const raw = await res.text();
+    const text = /\.md([?#].*)?$/i.test(path)
+      ? markdownToText(raw)
+      : new DOMParser().parseFromString(raw, "text/html").body?.textContent || "";
+    const paragraphs = text
+      .split(/\n\s*\n/)
+      .map((para) => para.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    return paragraphs.length ? paragraphs : null;
+  })().catch(() => null);
+  readingCache.set(key, job);
+  return job;
+}
+
+// ตัดย่อหน้าทั้งบทเป็นบรรทัด แล้วซอยเป็นหน้า ๆ ตามจำนวนบรรทัดที่กระดาษรับได้
+function paginateChapter(paragraphs, chapterNo, chapterTitle) {
+  const ctx = document.createElement("canvas").getContext("2d");
+  ctx.font = `400 21px ${SERIF}`;
+  const lines = [];
+  paragraphs.forEach((para) => {
+    wrapToWidth(ctx, para, PAGE_COL, 400).forEach((line) => lines.push(line));
+    lines.push("");
+  });
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+
+  const firstPageLines = Math.floor((TEXT_BOTTOM - 250) / TEXT_LINE_H);
+  const fullPageLines = Math.floor((TEXT_BOTTOM - TEXT_TOP) / TEXT_LINE_H);
+  const pages = [];
+  let cursor = 0;
+  while (cursor < lines.length) {
+    const first = pages.length === 0;
+    const take = first ? firstPageLines : fullPageLines;
+    pages.push({
+      kind: "text",
+      chapterNo,
+      heading: first ? chapterTitle : null,
+      runningHead: `บทที่ ${pad(chapterNo)}`,
+      lines: lines.slice(cursor, cursor + take)
+    });
+    cursor += take;
+  }
+  return pages.length ? pages : [{ kind: "text", chapterNo, heading: chapterTitle, lines: [] }];
+}
+
+function buildReadingSpecs(book, chapterNo, pages) {
+  const hasSecondToc = book.chapterTitles.length > TOC_PER_PAGE;
+  const nextTitle = book.chapterTitles[chapterNo];
+  const specs = [
+    { kind: "title" },
+    { kind: "toc", from: 0 },
+    hasSecondToc ? { kind: "toc", from: TOC_PER_PAGE } : { kind: "progress" },
+    ...pages,
+    {
+      kind: "end",
+      heading: `จบบทที่ ${chapterNo}`,
+      note: nextTitle
+        ? `บทถัดไป — ${nextTitle}\nกด "บทถัดไป" เพื่ออ่านต่อในเล่ม หรือกด "อ่านแบบ 2D" เพื่อค้นหาและคัดลอกข้อความ`
+        : 'บทสุดท้ายของเล่มแล้ว กด "อ่านแบบ 2D" เพื่อกลับไปหน้าอ่านปกติ'
+    },
+    { kind: "colophon" }
+  ];
+  // เติมหน้าเปล่าให้ครบชุดละ 8 กระดาษใบสุดท้ายจะได้ไม่ค้างภาพหน้าเก่า
+  while (specs.length % PAGE_FACES !== 0) specs.push({ kind: "blank" });
+  return specs;
+}
+
+function disposeReadingTextures(rig) {
+  (rig.readingTextures || []).forEach((texture) => texture?.dispose());
+  rig.readingTextures = [];
+}
+
+function renderReadingBatch(rig, batch) {
+  const book = rig.data;
+  const specs = rig.reading.specs;
+  const total = Math.ceil(specs.length / PAGE_FACES);
+  const next = clamp(batch, 0, total - 1);
+  disposeReadingTextures(rig);
+  rig.readingTextures = [];
+
+  for (let face = 0; face < PAGE_FACES; face += 1) {
+    const material = rig.interiorPageMaterials[face];
+    if (!material) continue;
+    const folio = next * PAGE_FACES + face;
+    const spec = specs[folio] || { kind: "blank" };
+    const texture = makeInteriorPageTexture(book, spec, folio);
+    rig.readingTextures.push(texture);
+    material.map = texture;
+    material.needsUpdate = true;
+  }
+
+  rig.reading.batch = next;
+  rig.reading.batches = total;
+  requestFrame();
+}
+
+async function enterReading(rig, chapterNo) {
+  const book = rig.data;
+  const no = clamp(chapterNo, 1, Math.max(1, book.chapterPaths.length));
+  if (rig.reading && rig.reading.chapterNo === no) return true;
+
+  readingBusy = true;
+  updatePageControls(false);
+  const paragraphs = await loadChapterText(book, no);
+  readingBusy = false;
+  // ระหว่างรอโหลด ผู้ใช้อาจปิดเล่มหรือเปลี่ยนไปเล่มอื่นแล้ว
+  if (activeBook !== rig) return false;
+  if (!paragraphs) {
+    updatePageControls(false);
+    return false;
+  }
+
+  const pages = paginateChapter(paragraphs, no, book.chapterTitles[no - 1] || `บทที่ ${no}`);
+  rig.reading = {
+    chapterNo: no,
+    title: book.chapterTitles[no - 1] || `บทที่ ${no}`,
+    specs: buildReadingSpecs(book, no, pages),
+    batch: 0,
+    batches: 1
+  };
+  renderReadingBatch(rig, 0);
+  updatePageControls(false);
+  return true;
+}
+
+// ย้ายไปชุดถัดไป/ก่อนหน้า — กระดาษชุดเดิมถูกวาดใหม่ จึงต้องตัดภาพไม่ให้เห็นหน้าพลิกย้อน
+function shiftReadingBatch(direction) {
+  const rig = activeBook;
+  if (!rig?.reading) return false;
+  const next = rig.reading.batch + direction;
+  if (next < 0 || next >= rig.reading.batches) return false;
+  renderReadingBatch(rig, next);
+  currentSpread = direction > 0 ? 0 : SPREAD_COUNT - 1;
+  readingFocus = direction > 0 ? 1 : -1;
+  snapPages = true;
+  updatePageControls(true);
+  requestFrame();
+  setTimeout(frameOpenSpread, 60);
+  return true;
+}
+
+function readingFolioRange() {
+  const rig = activeBook;
+  const base = (rig?.reading?.batch || 0) * PAGE_FACES;
+  if (currentSpread === 0) return [base, base];
+  if (currentSpread === SPREAD_COUNT - 1) return [base + PAGE_FACES - 1, base + PAGE_FACES - 1];
+  return [base + currentSpread * 2 - 1, base + currentSpread * 2];
+}
+
+async function goToChapter(direction) {
+  const rig = activeBook;
+  if (!rig?.reading) return;
+  const target = rig.reading.chapterNo + direction;
+  if (target < 1 || target > rig.data.chapterPaths.length) return;
+  rig.reading = null;
+  const ok = await enterReading(rig, target);
+  if (!ok) return;
+  currentSpread = direction > 0 ? 0 : SPREAD_COUNT - 1;
+  snapPages = true;
+  updatePageControls(true);
+  requestFrame();
+}
+
 function openDetail(origin = inspectButton) {
   if (mode !== "hero") return;
   mode = "opening";
@@ -3529,6 +3827,7 @@ function openDetail(origin = inspectButton) {
       : inspectButton;
   activeBook = bookRigs[selectedIndex];
   activeBook.contactShadow.visible = false;
+  refreshProgress(activeBook.data);
   populateDetail(activeBook.data);
   updatePageControls(false);
   detailPanel.inert = false;
@@ -3624,7 +3923,14 @@ function finishOpening() {
   controls.update();
   updatePageControls(false);
   experience.classList.remove("is-opening");
-  closeButton.focus({ preventScroll: true });
+  if (pendingReadChapter) {
+    const chapter = pendingReadChapter;
+    pendingReadChapter = 0;
+    activeBook.data.lastChapter = clamp(chapter, 1, activeBook.data.chapterCount || 1);
+    setReadingOpen(true, false);
+  } else {
+    closeButton.focus({ preventScroll: true });
+  }
 }
 
 function closeDetail() {
@@ -3736,8 +4042,53 @@ function finishClosing() {
   requestAnimationFrame(() => focusReturnTarget?.focus?.({ preventScroll: true }));
 }
 
+/* จอแนวตั้ง: หนังสือที่กางออกกว้างกว่าจอ ขอบซ้ายเลยโดนตัดหาย
+   วัดขอบเขตจริงของเล่มแล้วถอยกล้องให้พอดีทั้งสเปรด (ยังซูมเองต่อได้) */
+const readingBox = new THREE.Box3();
+const readingSize = new THREE.Vector3();
+const readingCenter = new THREE.Vector3();
+
+let readingFocus = 1; // 1 = เล็งหน้าขวา, -1 = หน้าซ้าย — ตามทิศที่เพิ่งพลิก
+
+function frameOpenSpread() {
+  if (mode !== "detail" || !activeBook || !readingOpen) return false;
+  const portrait = viewHeight > viewWidth;
+  if (viewWidth >= 900 || !portrait) return false;
+
+  readingBox.setFromObject(activeBook.root);
+  if (readingBox.isEmpty()) return false;
+  readingBox.getSize(readingSize);
+  readingBox.getCenter(readingCenter);
+
+  /* มือถือแนวตั้ง: สเปรดสองหน้าเล็กจนอ่านไม่ออก เล็งทีละหน้าตามทิศที่พลิกไป
+     ครึ่งหนึ่งของกล่องไม่เท่ากับหนึ่งหน้าพอดี เพราะปกแข็งยื่นเลยขอบกระดาษออกมา
+     จึงเผื่อกรอบไว้ให้กว้างกว่าครึ่ง ไม่งั้นขอบซ้ายของหน้าโดนตัดหาย */
+  const onePage = viewWidth < 720;
+  const frameWidth = onePage ? readingSize.x * 0.6 : readingSize.x;
+  const centerX = onePage
+    ? readingCenter.x + readingFocus * readingSize.x * 0.21
+    : readingCenter.x;
+
+  const fovY = THREE.MathUtils.degToRad(camera.fov);
+  const fovX = 2 * Math.atan(Math.tan(fovY * 0.5) * camera.aspect);
+  const distance = Math.max(
+    (frameWidth * 1.06) / (2 * Math.tan(fovX * 0.5)),
+    (readingSize.y * (onePage ? 1.02 : 1.12)) / (2 * Math.tan(fovY * 0.5))
+  );
+
+  controls.target.set(centerX, readingCenter.y, inspectPosition.z);
+  camera.position.set(centerX, readingCenter.y, inspectPosition.z + distance);
+  controls.update();
+  requestFrame();
+  return true;
+}
+
 function resetInspectionView() {
   if (mode !== "detail") return;
+  if (frameOpenSpread()) {
+    liveRegion.textContent = `รีเซ็ตมุมมองของ ${BOOKS[selectedIndex].title} แล้ว`;
+    return;
+  }
   camera.position.copy(inspectCameraPosition);
   controls.target.copy(inspectCameraTarget);
   controls.update();
@@ -3928,6 +4279,7 @@ function frame(time) {
   }
 
   renderer.render(scene, camera);
+  snapPages = false;
 
   const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || wheelIdle > 0;
   const shouldContinue = !reducedMotion
@@ -3959,7 +4311,8 @@ function resize() {
     transitionCameraTarget.copy(inspectCameraTarget);
     currentViewOffsetX = detailViewOffsetX;
     applyDetailViewOffset();
-    resetInspectionView();
+    if (!frameOpenSpread()) resetInspectionView();
+    updatePageControls(false); // คำแนะนำใต้ปุ่มเปลี่ยนตามแนวตั้ง/แนวนอน
   }
   requestFrame();
 }
@@ -4233,6 +4586,8 @@ async function initialize() {
   previousPageButton.addEventListener("click", () => turnPage(-1));
   nextPageButton.addEventListener("click", () => turnPage(1));
   resetButton.addEventListener("click", resetInspectionView);
+  chapterPrevButton?.addEventListener("click", () => goToChapter(-1));
+  chapterNextButton?.addEventListener("click", () => goToChapter(1));
 
   applyWoodTexture();
   renderer.render(scene, camera);
@@ -4244,6 +4599,20 @@ async function initialize() {
   // ให้หน้าอื่น (ปุ่มสลับมุมมอง/ค้นหา) สั่งชั้นหนังสือได้โดยไม่ต้องรู้ภายใน
   window.ebookShelf = {
     select: (index) => selectMarker(index, null),
+    openBook: (bookId, chapterNo, startReading) => {
+      const index = BOOKS.findIndex((entry) => entry.id === bookId);
+      if (index < 0 || mode !== "hero") return false;
+      updateSelection(index, false);
+      alignShelfToSelection();
+      bookRigs.forEach((rig, slot) => snapRigToShelfSlot(rig, slot));
+      pendingReadChapter = startReading ? Math.max(1, chapterNo || 1) : 0;
+      openDetail(inspectButton);
+      return true;
+    },
+    turnPage,
+    goToChapter,
+    toggleReading: (open) => setReadingOpen(open),
+    isReading: () => mode === "detail" && readingOpen,
     close: () => {
       if (mode === "detail") closeDetail();
     },
