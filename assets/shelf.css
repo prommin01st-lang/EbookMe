@@ -850,117 +850,143 @@ body:not(.no-webgl) .fallback-note {
     display: none;
   }
 
-  /* แผงรายละเอียดกลายเป็นแผ่นล่างจอที่หุบเก็บได้ */
-  .detail-panel {
-    top: auto;
-    right: 12px;
-    bottom: max(12px, env(safe-area-inset-bottom));
-    left: 12px;
-    width: auto;
-    max-height: 54vh;
-    padding: 12px 14px 14px;
-    border: 1px solid var(--sh-rule);
-    border-radius: 18px;
-    background: color-mix(in srgb, var(--sh-paper) 86%, transparent);
-    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.22);
-    transform: translateY(18px);
-    backdrop-filter: blur(14px);
+}
+
+/* ---------- แผงรายละเอียดแบบ "แผ่นล่างจอ" ----------
+   ใช้เมื่อจอแคบ จอแนวตั้ง หรือกำลังอ่านอยู่บนจอกว้าง
+   ตอนอ่านจริงบนจอใหญ่ ถ้าปล่อยแผงไว้ข้าง ๆ หนังสือจะเหลือแค่ครึ่งจอ
+   shelf.js เป็นคนใส่/ถอดคลาสนี้ (ดู syncPanelLayout) เพราะเงื่อนไขมีสถานะการอ่านผสมอยู่ */
+
+/* แผงรายละเอียดกลายเป็นแผ่นล่างจอที่หุบเก็บได้ */
+.detail-panel.as-sheet {
+  top: auto;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 12px;
+  width: auto;
+  max-height: 54vh;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--sh-rule);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--sh-paper) 86%, transparent);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.22);
+  transform: translateY(18px);
+  backdrop-filter: blur(14px);
+}
+
+.mode-detail .detail-panel.as-sheet {
+  transform: translateY(0);
+}
+
+.detail-panel.as-sheet .panel-toggle {
+  display: grid;
+}
+
+.detail-panel.as-sheet .close-button,
+.detail-panel.as-sheet .panel-toggle {
+  top: 10px;
+}
+
+/* จอแคบปุ่มปิดกับปุ่มย่อเรียงกันอยู่แล้ว กันที่แนวนอนพอ ไม่ต้องกันแนวตั้ง */
+.detail-panel.as-sheet .eyebrow {
+  min-height: 0;
+  margin-right: 104px;
+}
+
+.detail-panel.as-sheet .detail-title {
+  max-width: calc(100% - 104px);
+  font-size: clamp(1.5rem, 5.4vw, 2.2rem);
+}
+
+.detail-panel.as-sheet .detail-deck {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 12px;
+  font-size: 0.95rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* จอแคบ: ปุ่มพลิกหน้าต้องอยู่เหนือส่วนที่หุบได้ ไม่งั้นพอหุบแล้วเหลือแต่การลากนิ้ว
+   และไม่รู้ว่าอ่านถึงหน้าไหน */
+.detail-panel.as-sheet {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-panel.as-sheet .eyebrow { order: -3; }
+.detail-panel.as-sheet .detail-title { order: -2; }
+.detail-panel.as-sheet .page-navigation { order: -1; }
+
+.detail-panel:not(.is-reading) .page-navigation {
+  display: none;
+}
+
+.detail-panel.as-sheet .page-navigation {
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+/* หุบแล้วเหลือชื่อเรื่อง แถบพลิกหน้า และปุ่มอ่าน — หนังสือได้ที่เหลือทั้งหมด */
+.detail-panel.as-sheet.is-collapsed {
+  max-height: none;
+}
+
+.detail-panel.as-sheet.is-collapsed .detail-body,
+.detail-panel.as-sheet.is-collapsed .chapter-nav,
+.detail-panel.as-sheet.is-collapsed #reset-view,
+.detail-panel.as-sheet.is-collapsed .detail-controls .microcopy {
+  display: none;
+}
+
+/* หุบแล้วยังต้องสลับไป 2D ได้ แต่ให้อยู่แถวเดียวกับปุ่มหลักเพื่อประหยัดที่ */
+.detail-panel.as-sheet .detail-controls {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.detail-panel.as-sheet .surface-switch {
+  justify-self: end;
+}
+
+.detail-panel.as-sheet .surface-opt {
+  padding: 0 10px;
+  font-size: 0.68rem;
+}
+
+.detail-panel.as-sheet.is-collapsed .detail-title {
+  overflow: hidden;
+  font-size: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-panel.as-sheet.is-collapsed .eyebrow {
+  margin-bottom: 6px;
+}
+
+.detail-panel.as-sheet.is-collapsed .detail-controls {
+  margin-top: 12px;
+}
+
+
+/* จอกว้าง: แผ่นล่างจอไม่ต้องยืดเต็มความกว้าง จัดกลางไว้ใต้หนังสือ */
+@media (min-width: 901px) {
+  .detail-panel.as-sheet {
+    right: auto;
+    left: 50%;
+    width: min(860px, calc(100vw - 64px));
+    max-height: 46vh;
+    transform: translateX(-50%) translateY(18px);
   }
 
-  .mode-detail .detail-panel {
-    transform: translateY(0);
+  .mode-detail .detail-panel.as-sheet {
+    transform: translateX(-50%) translateY(0);
   }
 
-  .panel-toggle {
-    display: grid;
-  }
-
-  .close-button,
-  .panel-toggle {
-    top: 10px;
-  }
-
-  /* จอแคบปุ่มปิดกับปุ่มย่อเรียงกันอยู่แล้ว กันที่แนวนอนพอ ไม่ต้องกันแนวตั้ง */
-  .eyebrow {
-    min-height: 0;
-    margin-right: 104px;
-  }
-
-  .detail-title {
-    max-width: calc(100% - 104px);
-    font-size: clamp(1.5rem, 5.4vw, 2.2rem);
-  }
-
-  .detail-deck {
-    display: -webkit-box;
-    overflow: hidden;
-    margin-top: 12px;
-    font-size: 0.95rem;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-  }
-
-  /* จอแคบ: ปุ่มพลิกหน้าต้องอยู่เหนือส่วนที่หุบได้ ไม่งั้นพอหุบแล้วเหลือแต่การลากนิ้ว
-     และไม่รู้ว่าอ่านถึงหน้าไหน */
-  .detail-panel {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .eyebrow { order: -3; }
-  .detail-title { order: -2; }
-  .page-navigation { order: -1; }
-
-  .detail-panel:not(.is-reading) .page-navigation {
-    display: none;
-  }
-
-  .page-navigation {
-    margin-top: 12px;
-    padding-top: 12px;
-  }
-
-  /* หุบแล้วเหลือชื่อเรื่อง แถบพลิกหน้า และปุ่มอ่าน — หนังสือได้ที่เหลือทั้งหมด */
-  .detail-panel.is-collapsed {
-    max-height: none;
-  }
-
-  .detail-panel.is-collapsed .detail-body,
-  .detail-panel.is-collapsed .chapter-nav,
-  .detail-panel.is-collapsed #reset-view,
-  .detail-panel.is-collapsed .detail-controls .microcopy {
-    display: none;
-  }
-
-  /* หุบแล้วยังต้องสลับไป 2D ได้ แต่ให้อยู่แถวเดียวกับปุ่มหลักเพื่อประหยัดที่ */
-  .detail-controls {
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: 8px 10px;
-  }
-
-  .surface-switch {
-    justify-self: end;
-  }
-
-  .surface-opt {
-    padding: 0 10px;
-    font-size: 0.68rem;
-  }
-
-  .detail-panel.is-collapsed .detail-title {
-    overflow: hidden;
-    font-size: 1.25rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .detail-panel.is-collapsed .eyebrow {
-    margin-bottom: 6px;
-  }
-
-  .detail-panel.is-collapsed .detail-controls {
-    margin-top: 12px;
+  .detail-panel.as-sheet .detail-title {
+    font-size: 1.35rem;
   }
 }
 

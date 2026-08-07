@@ -2891,6 +2891,23 @@ function getSpreadLabels(book) {
   return ["ปกใน", `สารบัญ · ${toc}`, "ความคืบหน้า", "แผ่นลาย · บันทึก", "ท้ายเล่ม"];
 }
 
+/* แผงรายละเอียดมีสองทรง: แปะข้างหนังสือ (จอกว้างตอนแค่หยิบมาดู)
+   กับแผ่นล่างจอ (จอแคบ จอแนวตั้ง หรือ "กำลังอ่าน" ไม่ว่าจอใหญ่แค่ไหน)
+   ตอนอ่านจริงบนจอใหญ่ ถ้าปล่อยแผงไว้ข้าง ๆ หนังสือจะได้พื้นที่แค่ครึ่งจอ */
+function shouldUseSheet() {
+  return readingOpen || viewWidth <= 900 || isPortraitLayout();
+}
+
+function syncPanelLayout() {
+  const sheet = shouldUseSheet();
+  if (detailPanel.classList.contains("as-sheet") === sheet) return;
+  detailPanel.classList.toggle("as-sheet", sheet);
+  // ทรงแผงเปลี่ยน = พื้นที่ว่างเปลี่ยน กล้องต้องวัดกรอบใหม่
+  requestAnimationFrame(() => {
+    if (!frameOpenSpread(true)) resetInspectionView();
+  });
+}
+
 function updatePageControls(announce = false) {
   const rig = activeBook;
   const book = rig?.data || BOOKS[selectedIndex];
@@ -2943,6 +2960,7 @@ function updatePageControls(announce = false) {
       ? "กำลังอ่านทีละหน้าให้ตัวหนังสือใหญ่พอ · ลากหน้ากระดาษเพื่อพลิก"
       : "ลากหน้ากระดาษเพื่อพลิก · ลากปกเพื่อปิด · ลากพื้นหลังเพื่อหมุนดู";
   detailPanel.classList.toggle("is-reading", readingOpen);
+  syncPanelLayout();
   if (spreadModeButton) {
     spreadModeButton.hidden = !readingOpen;
     spreadModeButton.textContent = onePageView ? "▭ หน้าเดียว" : "▭▭ หน้าคู่";
@@ -2971,6 +2989,9 @@ function setReadingOpen(open, announce = true) {
   if (!readingOpen) currentSpread = 0;
   // เปิดเล่มเมื่อไหร่ค่อยไปดึงเนื้อหาบทมาวาด ไม่ต้องโหลดตั้งแต่ตอนเลื่อนดูบนชั้น
   if (readingOpen && activeBook) {
+    // เปิดอ่านคือมาอ่าน ไม่ได้มาดูข้อมูลเล่ม — หุบรายละเอียดไว้ก่อน กดกางเมื่อไหร่ก็ได้
+    detailPanel.classList.add("is-collapsed");
+    panelToggle?.setAttribute("aria-expanded", "false");
     enterReading(activeBook, activeBook.data.lastChapter || 1);
     setTimeout(() => frameOpenSpread(true), 700); // รอปกกางสุดก่อนค่อยวัดขนาด
   } else {
@@ -4446,10 +4467,14 @@ function setSpreadPreference(value) {
 function frameOpenSpread(instant = false) {
   if (mode !== "detail" || !activeBook || !readingOpen) return false;
   const onePage = wantsOnePage();
-  // เฉพาะจอกว้างแนวนอนที่ใช้กรอบมาตรฐานข้าง ๆ แผงรายละเอียด
-  // แนวตั้งไม่ว่ากว้างแค่ไหนต้องวัดกรอบเอง ไม่งั้นหนังสือล้นออกนอกจอ
-  const wideLandscape = viewWidth >= 900 && viewWidth > viewHeight;
-  if (!onePage && wideLandscape) return false;
+
+  /* เดิมจอกว้างแนวนอนใช้กรอบมาตรฐานที่เยื้องหนังสือไปทางซ้ายให้พ้นแผง
+     แต่ตอนอ่านแผงย้ายไปอยู่ล่างจอแล้ว หนังสือจึงควรได้ความกว้างทั้งหมด
+     กรอบที่วัดจากขนาดจริงของเล่มใช้ได้กับทุกขนาดจอ */
+  if (currentViewOffsetX !== 0) {
+    currentViewOffsetX = 0;
+    applyDetailViewOffset();
+  }
 
   readingBox.setFromObject(activeBook.root);
   if (readingBox.isEmpty()) return false;
@@ -4478,7 +4503,8 @@ function frameOpenSpread(instant = false) {
      หลังแผงครึ่งหนึ่ง — วัดพื้นที่ว่างจริงแล้ววางหนังสือกลางพื้นที่นั้นแทน */
   const panelTop = detailPanel.getBoundingClientRect().top;
   const freeBottom = panelTop > 80 ? Math.min(panelTop - 8, viewHeight) : viewHeight;
-  const freeTop = 78; // ใต้แถบเครื่องมือด้านบน (ปุ่มสูง 44px + ระยะขอบ)
+  // ใต้แถบเครื่องมือด้านบน — จอสัมผัสปุ่มสูง 44px จอเมาส์เตี้ยกว่า
+  const freeTop = LOW_POWER ? 78 : 58;
   const freeHeight = Math.max(160, freeBottom - freeTop);
 
   const fovY = THREE.MathUtils.degToRad(camera.fov);
@@ -4486,7 +4512,7 @@ function frameOpenSpread(instant = false) {
   const distance = Math.max(
     (frameWidth * 1.1) / (2 * Math.tan(fovX * 0.5)),
     // สูงเท่าพื้นที่ว่าง ไม่ใช่เท่าความสูงจอ จึงต้องถอยกล้องเพิ่มตามสัดส่วน
-    (((onePage ? pageSize.y || readingSize.y : readingSize.y) * 1.08) / (2 * Math.tan(fovY * 0.5)))
+    (((onePage ? pageSize.y || readingSize.y : readingSize.y) * 1.03) / (2 * Math.tan(fovY * 0.5)))
       * (viewHeight / freeHeight)
   );
 

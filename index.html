@@ -271,6 +271,11 @@ function applyAdaptivePanel() {
   panelEl.classList.toggle('is-collapsed', saved ? saved === 'collapsed' : portrait);
   panelToggle.setAttribute('aria-expanded', String(!panelEl.classList.contains('is-collapsed')));
 }
+
+// กางหรือหุบตอนอ่าน = คนละเรื่องกับตอนแค่ดูข้อมูลเล่ม อย่าให้ทับค่ากัน
+panelToggle.addEventListener('click', () => {
+  if (window.ebookShelf?.isReading()) localStorage.removeItem('ebook:shelfPanel');
+});
 applyAdaptivePanel();
 
 // ชั้นหนังสือพร้อมหลังสคริปต์นี้ — ถ้าเปิดมาที่มุมมองตาราง ต้องสั่งให้หยุดวาดทันที
