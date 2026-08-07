@@ -263,32 +263,29 @@ function canRead3D() {
 const panelEl = document.getElementById('detail-panel');
 const panelToggle = document.getElementById('panel-toggle');
 
-function setPanelCollapsed(collapsed) {
-  panelEl.classList.toggle('is-collapsed', collapsed);
-  panelToggle.setAttribute('aria-expanded', String(!collapsed));
-  localStorage.setItem('ebook:shelfPanel', collapsed ? 'collapsed' : 'open');
+/* ปุ่มนี้มีหน้าที่เดียว: ย่อ ↔ กาง ไม่ใช่วนสามระดับ
+   ของเดิมวน กางเต็ม → แถบ → ปุ่มลอย → กางเต็ม กดแล้วเดาไม่ออกว่าจะได้อะไรต่อ
+   ตอนอ่าน "ย่อ" คือยุบเหลือปุ่มลอย (หนังสือได้เต็มจอ) ตอนดูข้อมูลเล่มคือหุบเหลือแถบ */
+function setPanelState(state) {
+  const reading = !!window.ebookShelf?.isReading();
+  panelEl.classList.toggle('is-minimal', state === 'minimal');
+  panelEl.classList.toggle('is-collapsed', state !== 'open');
+  panelToggle.setAttribute('aria-expanded', String(state === 'open'));
+  panelToggle.setAttribute('aria-label',
+    state === 'open' ? 'ย่อแผงรายละเอียด' : 'กางแผงรายละเอียด');
+  panelToggle.title = state === 'open' ? 'ย่อแผงลง ให้หนังสือได้เต็มจอ' : 'กางแผงรายละเอียด';
+  localStorage.setItem(reading ? 'ebook:readPanel' : 'ebook:shelfPanel', state);
+  window.ebookShelf?.refit();
 }
 
-/* ตอนอ่านมีสามระดับ: กางเต็ม → หุบเหลือแถบ → ยุบเหลือปุ่มลอย
-   ตอนแค่ดูข้อมูลเล่มมีสองระดับเหมือนเดิม */
+function setPanelCollapsed(collapsed) {
+  setPanelState(collapsed ? 'collapsed' : 'open');
+}
+
 panelToggle.addEventListener('click', () => {
-  if (window.ebookShelf?.isReading()) {
-    const minimal = panelEl.classList.contains('is-minimal');
-    const collapsed = panelEl.classList.contains('is-collapsed');
-    let next;
-    if (minimal) next = 'open';
-    else if (collapsed) next = 'minimal';
-    else next = 'collapsed';
-    panelEl.classList.toggle('is-minimal', next === 'minimal');
-    panelEl.classList.toggle('is-collapsed', next !== 'open');
-    panelToggle.setAttribute('aria-expanded', String(next === 'open'));
-    panelToggle.setAttribute('aria-label',
-      next === 'minimal' ? 'กางแผงรายละเอียด' : 'ย่อแผงรายละเอียด');
-    localStorage.setItem('ebook:readPanel', next);
-    window.ebookShelf?.refit();
-    return;
-  }
-  setPanelCollapsed(!panelEl.classList.contains('is-collapsed'));
+  const open = !panelEl.classList.contains('is-collapsed') && !panelEl.classList.contains('is-minimal');
+  if (!open) return setPanelState('open');
+  setPanelState(window.ebookShelf?.isReading() ? 'minimal' : 'collapsed');
 });
 
 // จอแนวตั้งเปิดมาให้หุบไว้ก่อน หนังสือจะได้เต็มจอ เว้นแต่ผู้ใช้เคยกางไว้เอง

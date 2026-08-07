@@ -497,7 +497,7 @@ a:focus-visible {
   display: flex;
   align-items: center;
   min-height: 44px;
-  margin: 0 56px 8px 0;
+  margin: 0 104px 8px 0;
   color: var(--sh-ink-soft);
   font-size: 0.68rem;
   font-weight: 700;
@@ -708,7 +708,7 @@ a:focus-visible {
   position: absolute;
   top: 7px;
   right: 57px;
-  display: none;
+  display: grid;
   width: 42px;
   height: 42px;
   padding: 0;
@@ -986,6 +986,18 @@ body:not(.no-webgl) .fallback-note {
   flex-direction: column;
 }
 
+/* แผ่นล่างจอสูงได้แค่ 54vh พอเนื้อในยาวกว่านั้น flex จะบีบลูกทุกตัวให้เตี้ยลง
+   บนจอ 320px หัวข้อกับชื่อเล่มถูกบีบจนสูงศูนย์ แถวพลิกหน้าเลยเลื่อนขึ้นไปซ้อนปุ่มปิด
+   ห้ามบีบ — ยาวเกินก็ให้เลื่อนดูในแผงเอาแทน */
+.detail-panel.as-sheet > * {
+  flex: 0 0 auto;
+}
+
+/* กางเองแปลว่าอยากอ่านรายละเอียด ให้ที่มากขึ้นหน่อยจะได้ไม่ต้องเลื่อนหาปุ่ม */
+.detail-panel.as-sheet:not(.is-collapsed) {
+  max-height: min(70vh, 560px);
+}
+
 .detail-panel.as-sheet .eyebrow { order: -3; }
 .detail-panel.as-sheet .detail-title { order: -2; }
 .detail-panel.as-sheet .page-navigation { order: -1; }
@@ -997,6 +1009,18 @@ body:not(.no-webgl) .fallback-note {
 .detail-panel.as-sheet .page-navigation {
   margin-top: 12px;
   padding-top: 12px;
+}
+
+/* ตอนอ่าน ชื่อเล่มไม่ต้องกินสามบรรทัดใหญ่ ๆ แถบพลิกหน้าบอกชื่อบทให้อยู่แล้ว
+   และเรื่องย่อ/ข้อมูลเล่มก็ไม่ใช่สิ่งที่คนกำลังอ่านต้องการ — เก็บไว้ตอนดูข้อมูลเล่ม
+   ที่ว่างที่ได้คืนเอาไปให้ปุ่มที่ใช้จริงตอนอ่าน (สารบัญ ขนาดตัวอักษร เปลี่ยนบท) */
+.detail-panel.as-sheet.is-reading .detail-title {
+  font-size: 1.1rem;
+  -webkit-line-clamp: 1;
+}
+
+.detail-panel.as-sheet.is-reading .detail-body {
+  display: none;
 }
 
 /* หุบแล้วเหลือชื่อเรื่อง แถบพลิกหน้า และปุ่มอ่าน — หนังสือได้ที่เหลือทั้งหมด */
@@ -1013,15 +1037,23 @@ body:not(.no-webgl) .fallback-note {
   display: none;
 }
 
-/* หุบแล้วยังต้องสลับไป 2D ได้ แต่ให้อยู่แถวเดียวกับปุ่มหลักเพื่อประหยัดที่ */
+/* หุบแล้วยังต้องสลับไป 2D ได้ แต่ให้อยู่แถวเดียวกับปุ่มหลักเพื่อประหยัดที่
+   ใช้ flex เพราะ grid สองคอลัมน์บนจอ 320px จะดันแท็บ 2D/3D ทับปุ่มรีเซ็ตมุมมอง
+   (คอลัมน์ยุบเหลือศูนย์แต่เนื้อในไม่ยุบตาม) แบบนี้ไม่พอก็แค่ตกบรรทัดใหม่ */
 .detail-panel.as-sheet .detail-controls {
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 8px 10px;
 }
 
 .detail-panel.as-sheet .surface-switch {
-  justify-self: end;
+  margin-left: auto;
+}
+
+.detail-panel.as-sheet .detail-controls .microcopy {
+  flex-basis: 100%;
 }
 
 .detail-panel.as-sheet .surface-opt {
@@ -1147,6 +1179,29 @@ body:not(.no-webgl) .fallback-note {
 }
 
 @media (max-width: 620px) {
+  /* ปุ่มบนหัวกระดานเป็น 44px ตามเกณฑ์นิ้วสัมผัส สี่ปุ่มก็ 176px แล้ว
+     บนจอ 320px ถ้าไม่บีบระยะห่างกับขอบ แถบจะล้นออกขวา (หรือตกบรรทัดเป็นสองแถว) */
+  .editorial-header {
+    right: 12px;
+    left: 12px;
+    gap: 10px;
+  }
+
+  .editorial-identity {
+    min-width: 0;
+  }
+
+  .editorial-identity strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .shelf-tools {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
   .editorial-identity span,
   .selection__note {
     display: none;

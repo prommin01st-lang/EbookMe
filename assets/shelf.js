@@ -717,15 +717,39 @@ function makeCoverTexture(book) {
 
   drawMotif(ctx, book, 768, 1152);
 
-  // อีโมจิปกที่ผู้ใช้ตั้งไว้ ปั๊มเป็นลายน้ำจาง ๆ ให้จำเล่มได้จากระยะไกล
+  /* อีโมจิปกที่ผู้ใช้ตั้งไว้ — ของเดิมปั๊มเป็นลายน้ำ 12% ทับลายปกพอดี
+     กลายเป็นทั้งจางทั้งซ้อนกันจนดูไม่ออกว่าเป็นรูปอะไร ตอนนี้ให้มันมีที่ของตัวเอง:
+     เหรียญตราบังลายปกไว้ข้างหลัง แล้ววาดอีโมจิเต็มสีทับบนนั้น */
   if (book.cover) {
+    const cx = 768 / 2;
+    const cy = 1152 * 0.34;
+    const radius = 132;
     ctx.save();
-    ctx.globalAlpha = 0.12;
+    const plate = ctx.createRadialGradient(cx, cy - 28, 12, cx, cy, radius);
+    plate.addColorStop(0, "rgba(0,0,0,0.56)");
+    plate.addColorStop(0.82, "rgba(0,0,0,0.4)");
+    plate.addColorStop(1, "rgba(0,0,0,0.26)");
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fillStyle = plate;
+    ctx.fill();
+    ctx.strokeStyle = book.foil;
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius - 11, 0, Math.PI * 2);
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = '300px "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
-    ctx.fillText(book.cover, 768 / 2, 1152 * 0.37);
+    ctx.font = '150px "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+    ctx.fillText(book.cover, cx, cy + 6);
     ctx.restore();
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
   }
 
   /* ตัวหนังสือบนปกอยู่ในชั้นฟอยล์ (makeFoilTexture) ที่วาดทับอีกที ไม่ใช่ในผ้าปก
@@ -2921,7 +2945,13 @@ function getSpreadLabels(book) {
    กับแผ่นล่างจอ (จอแคบ จอแนวตั้ง หรือ "กำลังอ่าน" ไม่ว่าจอใหญ่แค่ไหน)
    ตอนอ่านจริงบนจอใหญ่ ถ้าปล่อยแผงไว้ข้าง ๆ หนังสือจะได้พื้นที่แค่ครึ่งจอ */
 function shouldUseSheet() {
-  return readingOpen || viewWidth <= 900 || isPortraitLayout();
+  /* หุบแผงแล้วต้องได้พื้นที่คืนจริง — แผงข้าง (จอกว้างแนวนอน) ไม่มีทรง "หุบ" ของตัวเอง
+     กดปุ่มย่อแล้วเลยไม่มีอะไรเกิดขึ้น พอหุบจึงย้ายมาเป็นแผ่นล่างจอ หนังสือได้เต็มจอ */
+  return readingOpen
+    || viewWidth <= 900
+    || isPortraitLayout()
+    || detailPanel.classList.contains("is-collapsed")
+    || detailPanel.classList.contains("is-minimal");
 }
 
 function syncPanelLayout() {
@@ -6016,8 +6046,11 @@ async function initialize() {
     setFontSize: (size) => setReaderFontSize(size),
     toggleReading: (open) => setReadingOpen(open),
     isReading: () => mode === "detail" && readingOpen,
-    // ขนาดแผงเปลี่ยน = พื้นที่ว่างเปลี่ยน กล้องต้องวัดกรอบใหม่
-    refit: () => requestAnimationFrame(() => { if (!frameOpenSpread(false)) resetInspectionView(); }),
+    // ขนาดแผงเปลี่ยน = พื้นที่ว่างเปลี่ยน ทรงแผงอาจต้องเปลี่ยนตาม แล้วกล้องวัดกรอบใหม่
+    refit: () => {
+      syncPanelLayout();
+      requestAnimationFrame(() => { if (!frameOpenSpread(false)) resetInspectionView(); });
+    },
     close: () => {
       if (mode === "detail") closeDetail();
     },

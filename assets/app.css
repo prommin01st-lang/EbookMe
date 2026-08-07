@@ -1064,6 +1064,28 @@ body.paged .content img { break-inside: avoid; }
   .btn .btn-label { display: none; }
 }
 
+/* จอมือถือแคบ (~320–430px): แถบบนมีปุ่มหลายตัว ต่อให้เหลือแค่ไอคอนแล้ว
+   ก็ยังกว้างเกินจอ ผลคือหน้าเลื่อนไปทางขวาได้ (บนมือถือจะเห็นเป็นเมนูล้นออกไป)
+   บีบระยะห่างลง ตรึงไม่ให้ปุ่มถูกยืด และให้ตัวแถบเลื่อนในตัวเองถ้ายังไม่พอ */
+@media (max-width: 480px) {
+  .topbar {
+    gap: 0.3rem;
+    padding-left: max(0.55rem, env(safe-area-inset-left));
+    padding-right: max(0.55rem, env(safe-area-inset-right));
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .topbar::-webkit-scrollbar { display: none; }
+
+  .topbar .btn { flex: 0 0 auto; padding-left: 0.5rem; padding-right: 0.5rem; }
+
+  /* โลโก้เหลือไอคอน — ยังกดกลับหน้าแรกได้เหมือนเดิม */
+  .topbar .brand { flex: 0 0 auto; font-size: 1rem; }
+  .topbar .brand span:not(.brand-icon) { display: none; }
+}
+
 /* เส้นสันหนังสือ ตอนแสดงหน้าซ้าย-ขวา ให้เห็นชัดว่าเป็นสองหน้า */
 body.paged.spread .reader-main::after {
   content: '';
