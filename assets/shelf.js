@@ -237,6 +237,7 @@ const readButton = document.querySelector("#read-book");
 const chapterPrevButton = document.querySelector("#chapter-prev");
 const chapterNextButton = document.querySelector("#chapter-next");
 const panelToggle = document.querySelector("#panel-toggle");
+const spreadModeButton = document.querySelector("#spread-mode");
 const previousPageButton = document.querySelector("#previous-page");
 const nextPageButton = document.querySelector("#next-page");
 const pageLabel = document.querySelector("#page-label");
@@ -2814,12 +2815,19 @@ function updatePageControls(announce = false) {
   }
   toggleBookButton.textContent = readingOpen ? "ปิดเล่ม" : "พลิกดูข้างใน";
   toggleBookButton.setAttribute("aria-pressed", String(readingOpen));
-  const onePageView = readingOpen && viewWidth < 720 && viewHeight > viewWidth;
+  const onePageView = readingOpen && wantsOnePage();
   detailMicrocopy.textContent = !readingOpen
     ? "ลากปกหรือแตะหนึ่งครั้งเพื่อเปิด · ลากพื้นหลังเพื่อหมุนดู"
     : onePageView
-      ? "จอแนวตั้งอ่านทีละหน้าให้ตัวหนังสือใหญ่พอ — หมุนจอเป็นแนวนอนเพื่อดูสองหน้าคู่"
+      ? "กำลังอ่านทีละหน้าให้ตัวหนังสือใหญ่พอ · ลากหน้ากระดาษเพื่อพลิก"
       : "ลากหน้ากระดาษเพื่อพลิก · ลากปกเพื่อปิด · ลากพื้นหลังเพื่อหมุนดู";
+  if (spreadModeButton) {
+    spreadModeButton.hidden = !readingOpen;
+    spreadModeButton.textContent = onePageView ? "▭ หน้าเดียว" : "▭▭ หน้าคู่";
+    spreadModeButton.title = onePageView
+      ? "กำลังแสดงทีละหน้า — แตะเพื่อดูสองหน้าคู่"
+      : "กำลังแสดงสองหน้าคู่ — แตะเพื่ออ่านทีละหน้าให้ตัวใหญ่ขึ้น";
+  }
   previousPageButton.setAttribute(
     "aria-label",
     previousDisabled ? "หน้าก่อนหน้า" : `หน้าก่อนหน้า: ${labels[currentSpread - 1]}`
@@ -3769,9 +3777,25 @@ async function enterReading(rig, chapterNo) {
     batch: 0,
     batches: 1
   };
-  renderReadingBatch(rig, 0);
+  /* หน้าแรกสุด (ปกใน) เป็นสเปรดหน้าเดียวโดยโครงสร้างของเล่ม — กระดาษยังไม่ถูกพลิกสักใบ
+     เปิดมาแล้วจึงพาไปที่สเปรดแรกที่มีเนื้อหาจริงเลย จะได้เห็นสองหน้าคู่ทันที
+     ปกใน/สารบัญยังพลิกย้อนกลับไปดูได้ */
+  const firstText = rig.reading.specs.findIndex((spec) => spec.kind === "text");
+  const landing = firstText > 0 ? firstText : 1;
+  renderReadingBatch(rig, Math.floor(landing / PAGE_FACES));
+  currentSpread = spreadForFace(landing % PAGE_FACES);
+  readingFocus = 1;
+  snapPages = true;
   updatePageControls(false);
+  setTimeout(frameOpenSpread, 60);
   return true;
+}
+
+// หน้าที่ f ของชุด อยู่ในสเปรดไหน (0 กับ 4 เป็นสเปรดหน้าเดียว ที่เหลือเป็นหน้าคู่)
+function spreadForFace(face) {
+  if (face <= 0) return 1;
+  if (face >= PAGE_FACES - 1) return SPREAD_COUNT - 1;
+  return Math.floor((face + 1) / 2);
 }
 
 // ย้ายไปชุดถัดไป/ก่อนหน้า — กระดาษชุดเดิมถูกวาดใหม่ จึงต้องตัดภาพไม่ให้เห็นหน้าพลิกย้อน
@@ -3781,7 +3805,7 @@ function shiftReadingBatch(direction) {
   const next = rig.reading.batch + direction;
   if (next < 0 || next >= rig.reading.batches) return false;
   renderReadingBatch(rig, next);
-  currentSpread = direction > 0 ? 0 : SPREAD_COUNT - 1;
+  currentSpread = direction > 0 ? 1 : SPREAD_COUNT - 2;
   readingFocus = direction > 0 ? 1 : -1;
   snapPages = true;
   updatePageControls(true);
@@ -4050,10 +4074,27 @@ const readingCenter = new THREE.Vector3();
 
 let readingFocus = 1; // 1 = เล็งหน้าขวา, -1 = หน้าซ้าย — ตามทิศที่เพิ่งพลิก
 
+// "auto" = ตัดสินจากขนาดจอ, "one"/"two" = ผู้ใช้สั่งเอง
+let spreadPreference = localStorage.getItem("ebook:shelf3dSpread") || "auto";
+
+function wantsOnePage() {
+  if (spreadPreference === "one") return true;
+  if (spreadPreference === "two") return false;
+  return viewWidth < 720 && viewHeight > viewWidth;
+}
+
+function setSpreadPreference(value) {
+  spreadPreference = value;
+  localStorage.setItem("ebook:shelf3dSpread", value);
+  updatePageControls(false);
+  if (!frameOpenSpread()) resetInspectionView();
+}
+
 function frameOpenSpread() {
   if (mode !== "detail" || !activeBook || !readingOpen) return false;
-  const portrait = viewHeight > viewWidth;
-  if (viewWidth >= 900 || !portrait) return false;
+  const onePage = wantsOnePage();
+  // จอกว้างที่ไม่ได้สั่งอ่านทีละหน้า ใช้กรอบมาตรฐานข้าง ๆ แผงรายละเอียดตามเดิม
+  if (!onePage && (viewWidth >= 900 || viewHeight <= viewWidth)) return false;
 
   readingBox.setFromObject(activeBook.root);
   if (readingBox.isEmpty()) return false;
@@ -4063,7 +4104,6 @@ function frameOpenSpread() {
   /* มือถือแนวตั้ง: สเปรดสองหน้าเล็กจนอ่านไม่ออก เล็งทีละหน้าตามทิศที่พลิกไป
      ครึ่งหนึ่งของกล่องไม่เท่ากับหนึ่งหน้าพอดี เพราะปกแข็งยื่นเลยขอบกระดาษออกมา
      จึงเผื่อกรอบไว้ให้กว้างกว่าครึ่ง ไม่งั้นขอบซ้ายของหน้าโดนตัดหาย */
-  const onePage = viewWidth < 720;
   const frameWidth = onePage ? readingSize.x * 0.6 : readingSize.x;
   const centerX = onePage
     ? readingCenter.x + readingFocus * readingSize.x * 0.21
@@ -4586,6 +4626,9 @@ async function initialize() {
   previousPageButton.addEventListener("click", () => turnPage(-1));
   nextPageButton.addEventListener("click", () => turnPage(1));
   resetButton.addEventListener("click", resetInspectionView);
+  spreadModeButton?.addEventListener("click", () => {
+    setSpreadPreference(wantsOnePage() ? "two" : "one");
+  });
   chapterPrevButton?.addEventListener("click", () => goToChapter(-1));
   chapterNextButton?.addEventListener("click", () => goToChapter(1));
 

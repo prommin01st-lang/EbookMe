@@ -582,9 +582,19 @@ a:focus-visible {
 
 .chapter-nav {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   margin-top: 14px;
+}
+
+.chapter-nav #spread-mode {
+  order: 1;
+}
+
+.chapter-nav #chapter-next {
+  order: 2;
 }
 
 .chapter-nav .text-button {
