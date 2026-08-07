@@ -725,12 +725,15 @@ function makeCoverTexture(book) {
     const cy = 1152 * 0.34;
     const radius = 132;
     ctx.save();
-    const plate = ctx.createRadialGradient(cx, cy - 28, 12, cx, cy, radius);
-    plate.addColorStop(0, "rgba(0,0,0,0.56)");
-    plate.addColorStop(0.82, "rgba(0,0,0,0.4)");
-    plate.addColorStop(1, "rgba(0,0,0,0.26)");
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    // ทึบก่อนหนึ่งชั้นด้วยสีปกเอง ลายที่วาดไว้ก่อนหน้าจะได้ไม่ทะลุขึ้นมาผ่ากลางไอคอน
+    ctx.fillStyle = book.color;
+    ctx.fill();
+    const plate = ctx.createRadialGradient(cx, cy - 28, 12, cx, cy, radius);
+    plate.addColorStop(0, "rgba(0,0,0,0.5)");
+    plate.addColorStop(0.82, "rgba(0,0,0,0.34)");
+    plate.addColorStop(1, "rgba(0,0,0,0.2)");
     ctx.fillStyle = plate;
     ctx.fill();
     ctx.strokeStyle = book.foil;

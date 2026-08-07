@@ -389,7 +389,10 @@ a:focus-visible {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  justify-content: flex-end;
+  /* ห้ามใช้ flex-end: พอขีดล้นกรอบ ส่วนที่ล้นจะไปกองทางซ้ายซึ่งเลื่อนไปหาไม่ได้เลย
+     (จอ 320px เห็นแค่สามเล่มท้าย) ใช้ margin ซ้ายอัตโนมัติแทน — เหลือที่ก็ยังชิดขวา
+     เหมือนเดิม พอไม่พอ margin กลายเป็นศูนย์ ทุกขีดจึงเลื่อนไปถึงได้ */
+  justify-content: flex-start;
   gap: 5px;
   max-width: 100%;
   overflow-x: auto;
@@ -403,6 +406,10 @@ a:focus-visible {
 
 .marker {
   flex: 0 0 auto;
+}
+
+.marker:first-child {
+  margin-left: auto;
 }
 
 .marker {
