@@ -1,0 +1,810 @@
+/* ============================================================
+   EbookMe — ชั้นหนังสือ 3D บนหน้าแรก
+   หน้าตา fork มาจาก "The Complete Shelf" ของ MengTo
+   (github.com/MengTo/complete-shelf — repo เปิดให้ remix ผ่าน PROMPT.md)
+   สีทั้งหมดมาจาก --sh-* ที่ shelf.js ตั้งตามเล่มที่เลือกอยู่
+   ============================================================ */
+
+:root {
+  --sh-paper: #141821;
+  --sh-paper-deep: #0d1017;
+  --sh-paper-pale: #f1eadf;
+  --sh-ink: #f4eee6;
+  --sh-ink-soft: #b3aea7;
+  --sh-rule: rgba(244, 238, 230, 0.24);
+  --sh-accent: #d08a54;
+  --sh-serif: "Noto Serif Thai", "Iowan Old Style", Baskerville, Georgia, serif;
+  --sh-sans: "Noto Sans Thai", Inter, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sh-ease: cubic-bezier(0.2, 0.72, 0.24, 1);
+}
+
+/* .loading/.experience ตั้ง display เอง ทับค่า display:none ที่มากับ [hidden] */
+[hidden] {
+  display: none !important;
+}
+
+/* ---------- สลับมุมมอง ---------- */
+
+body.view-shelf {
+  overflow: hidden;
+  background: var(--sh-paper);
+  transition: background-color 720ms var(--sh-ease);
+}
+
+body.view-shelf .grid-view {
+  display: none;
+}
+
+body.view-grid .experience {
+  display: none;
+}
+
+/* เครื่องที่ไม่มี WebGL อยู่กับมุมมองตารางอย่างเดียว ปุ่มสลับไม่มีประโยชน์ */
+body.no-webgl .experience,
+body.no-webgl #viewBtn {
+  display: none;
+}
+
+/* ---------- ฉาก ---------- */
+
+.experience {
+  position: fixed;
+  inset: 0;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--sh-paper);
+  font-family: var(--sh-sans);
+  color: var(--sh-ink);
+  transition: background-color 720ms var(--sh-ease), color 520ms var(--sh-ease);
+}
+
+.experience::after {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.1), transparent 22%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.14), transparent 24%);
+  content: "";
+  opacity: 0.52;
+  pointer-events: none;
+}
+
+.scene-shell {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+#scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: default;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 900ms var(--sh-ease);
+}
+
+.webgl-ready #scene {
+  opacity: 1;
+}
+
+#scene.has-book-hover {
+  cursor: pointer;
+}
+
+.mode-detail #scene,
+.mode-detail #scene.has-page-hover {
+  cursor: grab;
+}
+
+.mode-detail #scene.has-closed-book-hover {
+  cursor: pointer;
+}
+
+.mode-detail #scene.is-page-dragging,
+.mode-detail #scene:active {
+  cursor: grabbing;
+}
+
+/* ---------- หัวกระดาน ---------- */
+
+.editorial-header {
+  position: absolute;
+  top: max(24px, env(safe-area-inset-top));
+  right: 26px;
+  left: 26px;
+  z-index: 8;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  color: var(--sh-ink);
+  transition: color 520ms var(--sh-ease), opacity 520ms var(--sh-ease), transform 680ms var(--sh-ease);
+}
+
+.editorial-identity {
+  display: grid;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.editorial-identity strong {
+  font-family: var(--sh-serif);
+  font-size: clamp(1.2rem, 1.8vw, 1.7rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.editorial-identity span {
+  color: var(--sh-ink-soft);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1.5;
+  transition: color 520ms var(--sh-ease);
+}
+
+.shelf-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--sh-ink) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sh-paper) 55%, transparent);
+  color: var(--sh-ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  backdrop-filter: blur(10px);
+  transition: color 180ms ease, background 180ms ease, border-color 180ms ease;
+}
+
+.tool-btn:hover {
+  color: var(--sh-paper);
+  border-color: var(--sh-ink);
+  background: var(--sh-ink);
+}
+
+.tool-btn.tool-icon {
+  padding: 0;
+  width: 36px;
+  justify-content: center;
+}
+
+.mode-detail .editorial-header {
+  opacity: 0.6;
+  transform: translateY(-6px);
+}
+
+/* ---------- ป้ายลอยตามเมาส์ ---------- */
+
+.pointer-label {
+  position: fixed;
+  z-index: 12;
+  display: grid;
+  min-width: 120px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--sh-ink) 22%, transparent);
+  background: color-mix(in srgb, var(--sh-paper) 88%, transparent);
+  color: var(--sh-ink);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  line-height: 1.5;
+  transform: translate(16px, 18px);
+  transition: opacity 120ms ease;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.pointer-label strong {
+  font-family: var(--sh-serif);
+  font-size: 0.86rem;
+  letter-spacing: 0;
+}
+
+.pointer-label[aria-hidden="true"] {
+  opacity: 0;
+}
+
+@media (pointer: coarse) {
+  .pointer-label {
+    display: none;
+  }
+}
+
+/* ---------- แถบเลือกเล่มด้านล่าง ---------- */
+
+.browse-ui {
+  position: absolute;
+  right: 26px;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  left: 26px;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+  align-items: end;
+  gap: 24px;
+  color: var(--sh-ink);
+  transition: color 520ms var(--sh-ease), opacity 400ms var(--sh-ease), transform 650ms var(--sh-ease);
+}
+
+.mode-detail .browse-ui {
+  opacity: 0;
+  transform: translateY(26px);
+  pointer-events: none;
+}
+
+.selection {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: start;
+  gap: 13px;
+  min-width: 0;
+}
+
+.counter {
+  padding-top: 8px;
+  color: var(--sh-ink-soft);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: color 520ms var(--sh-ease);
+}
+
+.selection__copy {
+  min-width: 0;
+}
+
+.selection__title {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--sh-serif);
+  font-size: clamp(1.7rem, 3.2vw, 3.3rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selection__note {
+  display: -webkit-box;
+  max-width: 430px;
+  margin: 8px 0 0;
+  overflow: hidden;
+  color: var(--sh-ink-soft);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  transition: color 520ms var(--sh-ease);
+}
+
+.browse-actions {
+  display: flex;
+  align-self: end;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+
+.round-button,
+.text-button,
+.close-button,
+.page-button {
+  border: 1px solid color-mix(in srgb, var(--sh-ink) 40%, transparent);
+  background: transparent;
+  color: var(--sh-ink);
+  font: inherit;
+  cursor: pointer;
+  transition: color 180ms ease, border-color 180ms ease, background 180ms ease, transform 180ms var(--sh-ease);
+}
+
+.round-button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  place-items: center;
+}
+
+.round-button svg,
+.close-button svg,
+.page-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.3;
+}
+
+.text-button {
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.round-button:hover,
+.text-button:hover,
+.close-button:hover,
+.page-button:not(:disabled):hover {
+  color: var(--sh-paper);
+  border-color: var(--sh-ink);
+  background: var(--sh-ink);
+}
+
+.text-button.primary {
+  border-color: var(--sh-accent);
+  background: var(--sh-accent);
+  color: var(--sh-paper);
+}
+
+.text-button.primary:hover {
+  filter: brightness(1.12);
+  background: var(--sh-accent);
+  border-color: var(--sh-accent);
+  color: var(--sh-paper);
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--sh-accent);
+  outline-offset: 3px;
+}
+
+.index-nav {
+  display: grid;
+  align-self: end;
+  justify-items: end;
+  gap: 10px;
+  padding-bottom: 7px;
+}
+
+.markers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  max-width: 100%;
+}
+
+.marker {
+  position: relative;
+  width: 27px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.marker::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 17px;
+  height: 1px;
+  background: color-mix(in srgb, var(--sh-ink) 35%, transparent);
+  content: "";
+  transform: translate(-50%, -50%);
+  transition: width 260ms var(--sh-ease), background 220ms ease;
+}
+
+.marker:hover::before {
+  background: var(--sh-ink);
+}
+
+.marker[aria-current="true"]::before {
+  width: 27px;
+  height: 2px;
+  background: var(--sh-ink);
+}
+
+.microcopy {
+  margin: 0;
+  color: var(--sh-ink-soft);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-align: right;
+  transition: color 520ms var(--sh-ease);
+}
+
+/* ---------- แผงรายละเอียดเล่ม ---------- */
+
+.detail-panel {
+  position: absolute;
+  top: 50%;
+  right: clamp(26px, 5vw, 78px);
+  z-index: 9;
+  width: min(34vw, 440px);
+  max-height: 74vh;
+  overflow: auto;
+  color: var(--sh-ink);
+  opacity: 0;
+  transform: translateY(calc(-50% + 18px));
+  transition: color 520ms var(--sh-ease), opacity 620ms var(--sh-ease), transform 620ms var(--sh-ease);
+  pointer-events: none;
+}
+
+.mode-detail .detail-panel {
+  opacity: 1;
+  transform: translateY(-50%);
+  transition-delay: 0ms, 300ms, 300ms;
+  pointer-events: auto;
+}
+
+.mode-detail.is-opening .detail-panel {
+  pointer-events: none;
+}
+
+.close-button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  place-items: center;
+}
+
+.eyebrow {
+  margin: 0 52px 12px 0;
+  color: var(--sh-ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  transition: color 520ms var(--sh-ease);
+}
+
+.detail-title {
+  max-width: calc(100% - 28px);
+  margin: 0;
+  font-family: var(--sh-serif);
+  font-size: clamp(2.2rem, 4.4vw, 4rem);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+.detail-deck {
+  max-width: 38em;
+  margin: 18px 0 0;
+  font-family: var(--sh-serif);
+  font-size: clamp(0.98rem, 1.3vw, 1.18rem);
+  line-height: 1.62;
+  transition: color 520ms var(--sh-ease);
+}
+
+.meta-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 22px;
+  margin: 22px 0 0;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--sh-rule);
+  transition: border-color 520ms var(--sh-ease);
+}
+
+.meta-list div {
+  min-width: 0;
+}
+
+.meta-list dt {
+  margin: 0 0 5px;
+  color: var(--sh-ink-soft);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.meta-list dd {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.page-navigation {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--sh-rule);
+}
+
+.page-button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  place-items: center;
+}
+
+.page-button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.page-status {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  margin: 0;
+  text-align: center;
+}
+
+.page-status strong {
+  overflow: hidden;
+  font-family: var(--sh-serif);
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-status span {
+  color: var(--sh-ink-soft);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.detail-controls {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.detail-controls .microcopy {
+  text-align: left;
+}
+
+.detail-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-buttons .reset-button {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 0.7rem;
+}
+
+/* ---------- กำลังโหลด / ไม่มีหนังสือ ---------- */
+
+.loading {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  background: var(--sh-paper);
+  color: var(--sh-ink);
+  place-items: center;
+}
+
+.loading__inner {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+}
+
+.loading__mark {
+  position: relative;
+  width: 46px;
+  height: 58px;
+  border: 1px solid var(--sh-ink);
+  border-radius: 2px 5px 5px 2px;
+  animation: shelf-bind 1.6s var(--sh-ease) infinite alternate;
+}
+
+.loading__mark::before {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 7px;
+  width: 1px;
+  background: var(--sh-ink);
+  content: "";
+  opacity: 0.45;
+}
+
+.loading p {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+@keyframes shelf-bind {
+  from { transform: rotateY(-8deg) translateY(2px); }
+  to { transform: rotateY(14deg) translateY(-2px); }
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* ---------- มุมมองตาราง ---------- */
+
+.grid-view .view-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+body.no-webgl .view-back {
+  display: none;
+}
+
+.fallback-note {
+  max-width: 66rem;
+  margin: 0.9rem auto 0;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+body:not(.no-webgl) .fallback-note {
+  display: none;
+}
+
+/* ---------- จอแคบ ---------- */
+
+@media (max-width: 900px) {
+  .editorial-header {
+    right: 18px;
+    left: 18px;
+  }
+
+  .browse-ui {
+    right: 18px;
+    left: 18px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 16px;
+  }
+
+  .selection {
+    grid-column: 1 / -1;
+  }
+
+  .index-nav {
+    align-self: center;
+  }
+
+  .microcopy {
+    display: none;
+  }
+
+  .detail-panel {
+    top: auto;
+    right: 18px;
+    bottom: max(18px, env(safe-area-inset-bottom));
+    left: 18px;
+    width: auto;
+    max-height: 52vh;
+    padding-right: 4px;
+    transform: translateY(18px);
+  }
+
+  .mode-detail .detail-panel {
+    transform: translateY(0);
+  }
+
+  .detail-deck {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 0.95rem;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+}
+
+@media (max-width: 620px) {
+  .editorial-identity span,
+  .selection__note {
+    display: none;
+  }
+
+  .tool-btn .tool-label {
+    display: none;
+  }
+
+  .tool-btn {
+    padding: 0;
+    width: 36px;
+    justify-content: center;
+  }
+
+  .selection {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .selection__title {
+    font-size: 1.55rem;
+  }
+
+  .marker {
+    width: 18px;
+  }
+
+  .marker::before,
+  .marker[aria-current="true"]::before {
+    width: 12px;
+  }
+
+  .marker[aria-current="true"]::before {
+    width: 18px;
+  }
+
+  .meta-list {
+    gap: 12px 16px;
+  }
+}
+
+/* จอเตี้ยมาก (มือถือแนวนอน) — แถบบน/ล่างกินพื้นที่หนังสือจนเหลือนิดเดียว */
+@media (max-height: 520px) {
+  .editorial-identity strong {
+    font-size: 1rem;
+  }
+
+  .selection__title {
+    font-size: 1.35rem;
+  }
+
+  .selection__note,
+  .microcopy {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .experience *,
+  .experience *::before,
+  .experience *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

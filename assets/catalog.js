@@ -46,8 +46,16 @@ async function loadCloudBooks() {
   }
 }
 
+// หน้าแรกเรียก catalog หลายที่ (ชั้น 3D, มุมมองตาราง, ค้นหา) — ยิงเน็ตรอบเดียวพอ
+let catalogPromise = null;
+
 async function loadCatalog() {
-  const [local, cloud] = await Promise.all([loadLocalBooks(), loadCloudBooks()]);
-  const seen = new Set(local.map(b => b.id));
-  return [...local, ...cloud.filter(b => !seen.has(b.id))];
+  if (catalogPromise) return catalogPromise;
+  catalogPromise = (async () => {
+    const [local, cloud] = await Promise.all([loadLocalBooks(), loadCloudBooks()]);
+    const seen = new Set(local.map(b => b.id));
+    return [...local, ...cloud.filter(b => !seen.has(b.id))];
+  })();
+  catalogPromise.catch(() => { catalogPromise = null; }); // ล้มเหลวแล้วให้ลองใหม่ได้
+  return catalogPromise;
 }

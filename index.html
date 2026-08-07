@@ -16,82 +16,240 @@
       document.documentElement.style.setProperty('--font-ui',
         "'" + ff + "', \"Noto Sans Thai\", \"Sarabun\", -apple-system, \"Segoe UI\", Roboto, sans-serif");
     }
+    // เริ่มที่ชั้น 3D เว้นแต่ผู้ใช้เคยเลือกมุมมองตารางไว้ — กันหน้ากระพริบสลับมุมมองตอนโหลด
+    document.documentElement.dataset.homeView = localStorage.getItem('ebook:homeView') === 'grid' ? 'grid' : 'shelf';
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=Noto+Serif+Thai:wght@400;500;600&display=swap">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#3b82f6">
+<meta name="theme-color" content="#141821">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/shelf.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./assets/three/three.module.min.js",
+    "three/addons/": "./assets/three/addons/"
+  }
+}
+</script>
 </head>
 <body>
 
-<header class="topbar">
-  <a class="brand" href="index.html">
-    <span class="brand-icon">📚</span>
-    <span>EbookMe</span>
-  </a>
-  <div style="flex:1"></div>
-  <button class="btn" id="searchBtn" title="ค้นหาในหนังสือทุกเล่ม (Ctrl+K)">🔍<span class="btn-label"> ค้นหา</span></button>
-  <a class="btn primary" href="upload.html" title="เพิ่มหนังสือใหม่">＋<span class="btn-label"> เพิ่มหนังสือ</span></a>
-  <button class="btn btn-icon" id="themeBtn" title="เปลี่ยนธีม">🌙</button>
-</header>
-
-<div class="search-panel" id="searchPanel">
-  <div class="search-box">
-    <input type="search" id="searchInput" placeholder="พิมพ์คำที่ต้องการค้นหาในเนื้อหาทุกเล่ม… (อย่างน้อย 2 ตัวอักษร)">
+<!-- ============ ชั้นหนังสือ 3D ============ -->
+<main class="experience" id="experience">
+  <div class="scene-shell">
+    <canvas id="scene" aria-hidden="true"></canvas>
   </div>
-  <div class="search-status" id="searchStatus"></div>
-  <ul class="search-results" id="searchResults"></ul>
-</div>
 
-<section class="hero-section">
-  <div class="hero-card">
-    <h1>ยินดีต้อนรับสู่ห้องสมุดส่วนตัว 📖</h1>
-    <p>คลังหนังสือดิจิทัลสำหรับอ่านไฟล์ Markdown และ HTML ปรับแต่งธีม แบบอักษร และระบบพลิกหน้าอ่านสมจริงได้ตามต้องการ</p>
-    <div class="hero-stats" id="heroStats">
-      <div class="stat-pill"><span>📚 หนังสือทั้งหมด:</span> <span class="num" id="totalBooksCount">...</span></div>
-      <div class="stat-pill"><span>✅ อ่านจบแล้ว:</span> <span class="num" id="completedCount">...</span></div>
-      <div id="quickResumeContainer"></div>
+  <header class="editorial-header">
+    <div class="editorial-identity">
+      <strong>EbookMe</strong>
+      <span id="shelf-count">ห้องสมุดส่วนตัว</span>
     </div>
-  </div>
-</section>
+    <div class="shelf-tools">
+      <button class="tool-btn" id="searchBtn" type="button" title="ค้นหาในหนังสือทุกเล่ม (Ctrl+K)">
+        🔍<span class="tool-label"> ค้นหา</span>
+      </button>
+      <a class="tool-btn" href="upload.html" title="เพิ่มหนังสือใหม่">＋<span class="tool-label"> เพิ่มหนังสือ</span></a>
+      <button class="tool-btn" id="viewBtn" type="button" title="สลับไปมุมมองตาราง">
+        ▦<span class="tool-label"> ตาราง</span>
+      </button>
+      <button class="tool-btn tool-icon" id="themeBtn" type="button" title="เปลี่ยนธีม">🌙</button>
+    </div>
+  </header>
 
-<div class="shelf-controls">
-  <h2 class="shelf-title">📖 ชั้นหนังสือ</h2>
-  <div class="filter-tabs" id="filterTabs">
-    <button class="filter-tab active" data-filter="all">ทั้งหมด</button>
-    <button class="filter-tab" data-filter="reading">กำลังอ่าน</button>
-    <button class="filter-tab" data-filter="completed">อ่านจบแล้ว</button>
-    <button class="filter-tab" data-filter="cloud">คลาวด์ ☁️</button>
+  <div class="pointer-label" id="pointer-label" aria-hidden="true">
+    <span id="pointer-label-index">เล่มที่ 01</span>
+    <strong id="pointer-label-title"></strong>
   </div>
-</div>
 
-<main class="shelf" id="shelf">
-  <div class="empty-state">
-    <h3>กำลังโหลดชั้นหนังสือ…</h3>
+  <section class="browse-ui" id="browse-ui" aria-label="เลือกหนังสือบนชั้น">
+    <div class="selection">
+      <span class="counter" id="counter">01 / 01</span>
+      <div class="selection__copy">
+        <h1 class="selection__title" id="selection-title">กำลังโหลด…</h1>
+        <p class="selection__note" id="selection-note"></p>
+      </div>
+    </div>
+
+    <div class="browse-actions">
+      <button class="round-button" id="previous" type="button" aria-label="เล่มก่อนหน้า">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 3.5-4.5 4.5 4.5 4.5"></path></svg>
+      </button>
+      <button class="text-button" id="inspect" type="button">เปิดดู</button>
+      <button class="round-button" id="next" type="button" aria-label="เล่มถัดไป">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
+      </button>
+    </div>
+
+    <nav class="index-nav" aria-label="ดัชนีเล่ม">
+      <div class="markers" id="markers" role="tablist" aria-label="เลือกเล่ม"></div>
+      <p class="microcopy">เลื่อนล้อ · ปุ่มลูกศร · แตะที่หนังสือ</p>
+    </nav>
+  </section>
+
+  <aside class="detail-panel" id="detail-panel" role="dialog" aria-modal="true"
+         aria-labelledby="detail-title" aria-hidden="true" inert>
+    <button class="close-button" id="close-detail" type="button" aria-label="เก็บกลับขึ้นชั้น">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"></path></svg>
+    </button>
+    <p class="eyebrow" id="detail-eyebrow"></p>
+    <h2 class="detail-title" id="detail-title"></h2>
+    <p class="detail-deck" id="detail-deck"></p>
+    <dl class="meta-list">
+      <div>
+        <dt>ความคืบหน้า</dt>
+        <dd id="detail-binding"></dd>
+      </div>
+      <div>
+        <dt>อ่านล่าสุด</dt>
+        <dd id="detail-format"></dd>
+      </div>
+      <div>
+        <dt>เก็บไว้ที่</dt>
+        <dd id="detail-theme"></dd>
+      </div>
+      <div>
+        <dt>ปกเล่มนี้</dt>
+        <dd id="detail-motif"></dd>
+      </div>
+    </dl>
+    <div class="page-navigation" role="group" aria-label="พลิกดูหน้าตัวอย่าง">
+      <button class="page-button" id="previous-page" type="button" aria-label="หน้าก่อนหน้า" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 3.5-4.5 4.5 4.5 4.5"></path></svg>
+      </button>
+      <p class="page-status" aria-live="off">
+        <strong id="page-label">ปิดอยู่</strong>
+        <span id="page-counter">แตะที่หนังสือเพื่อเปิด</span>
+      </p>
+      <button class="page-button" id="next-page" type="button" aria-label="หน้าถัดไป" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
+      </button>
+    </div>
+    <div class="detail-controls">
+      <div class="detail-buttons">
+        <a class="text-button primary" id="read-book" href="#">เริ่มอ่าน</a>
+        <button class="text-button reset-button" id="toggle-book" type="button" aria-pressed="false">พลิกดูข้างใน</button>
+        <button class="text-button reset-button" id="reset-view" type="button">รีเซ็ตมุมมอง</button>
+      </div>
+      <p class="microcopy">ลากปกหรือแตะหนึ่งครั้งเพื่อเปิด · ลากพื้นหลังเพื่อหมุนดู</p>
+    </div>
+  </aside>
+
+  <div class="sr-only" id="live-region" aria-live="polite"></div>
+
+  <div class="loading" id="loading" aria-live="polite">
+    <div class="loading__inner">
+      <div class="loading__mark" aria-hidden="true"></div>
+      <p id="loading-text">กำลังจัดชั้นหนังสือ</p>
+    </div>
   </div>
 </main>
 
+<!-- ============ มุมมองตาราง ============ -->
+<div class="grid-view" id="gridView">
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <span class="brand-icon">📚</span>
+      <span>EbookMe</span>
+    </a>
+    <div style="flex:1"></div>
+    <button class="btn view-back" id="viewBackBtn" type="button" title="กลับไปชั้นหนังสือ 3D">
+      📖<span class="btn-label"> ชั้น 3D</span>
+    </button>
+    <button class="btn" id="searchBtnGrid" title="ค้นหาในหนังสือทุกเล่ม (Ctrl+K)">🔍<span class="btn-label"> ค้นหา</span></button>
+    <a class="btn primary" href="upload.html" title="เพิ่มหนังสือใหม่">＋<span class="btn-label"> เพิ่มหนังสือ</span></a>
+    <button class="btn btn-icon" id="themeBtnGrid" title="เปลี่ยนธีม">🌙</button>
+  </header>
+
+  <p class="fallback-note" id="fallback-status"></p>
+
+  <div class="search-panel" id="searchPanel">
+    <div class="search-box">
+      <input type="search" id="searchInput" placeholder="พิมพ์คำที่ต้องการค้นหาในเนื้อหาทุกเล่ม… (อย่างน้อย 2 ตัวอักษร)">
+    </div>
+    <div class="search-status" id="searchStatus"></div>
+    <ul class="search-results" id="searchResults"></ul>
+  </div>
+
+  <section class="hero-section">
+    <div class="hero-card">
+      <h1>ยินดีต้อนรับสู่ห้องสมุดส่วนตัว 📖</h1>
+      <p>คลังหนังสือดิจิทัลสำหรับอ่านไฟล์ Markdown และ HTML ปรับแต่งธีม แบบอักษร และระบบพลิกหน้าอ่านสมจริงได้ตามต้องการ</p>
+      <div class="hero-stats" id="heroStats">
+        <div class="stat-pill"><span>📚 หนังสือทั้งหมด:</span> <span class="num" id="totalBooksCount">...</span></div>
+        <div class="stat-pill"><span>✅ อ่านจบแล้ว:</span> <span class="num" id="completedCount">...</span></div>
+        <div id="quickResumeContainer"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="shelf-controls">
+    <h2 class="shelf-title">📖 ชั้นหนังสือ</h2>
+    <div class="filter-tabs" id="filterTabs">
+      <button class="filter-tab active" data-filter="all">ทั้งหมด</button>
+      <button class="filter-tab" data-filter="reading">กำลังอ่าน</button>
+      <button class="filter-tab" data-filter="completed">อ่านจบแล้ว</button>
+      <button class="filter-tab" data-filter="cloud">คลาวด์ ☁️</button>
+    </div>
+  </div>
+
+  <main class="shelf" id="shelf">
+    <div class="empty-state">
+      <h3>กำลังโหลดชั้นหนังสือ…</h3>
+    </div>
+  </main>
+</div>
+
 <script src="assets/catalog.js"></script>
+<script type="module" src="assets/shelf.js"></script>
 <script>
+/* ---------- สลับมุมมอง ชั้น 3D ↔ ตาราง ---------- */
+
+function setView(view, remember = true) {
+  document.body.classList.toggle('view-shelf', view === 'shelf');
+  document.body.classList.toggle('view-grid', view === 'grid');
+  if (remember) localStorage.setItem('ebook:homeView', view);
+  window.ebookShelf?.setActive(view === 'shelf');
+}
+
+setView(document.documentElement.dataset.homeView, false);
+
+document.getElementById('viewBtn').addEventListener('click', () => setView('grid'));
+document.getElementById('viewBackBtn').addEventListener('click', () => setView('shelf'));
+
+// ชั้นหนังสือพร้อมหลังสคริปต์นี้ — ถ้าเปิดมาที่มุมมองตาราง ต้องสั่งให้หยุดวาดทันที
+window.addEventListener('shelf:ready', () => {
+  window.ebookShelf.setActive(document.body.classList.contains('view-shelf'));
+});
+
+// ไม่มี WebGL ก็ไม่มีชั้น 3D ให้กลับไป
+window.addEventListener('shelf:fallback', () => setView('grid', false));
+
+/* ---------- ธีม ---------- */
+
 const THEMES = ['light', 'sepia', 'dark'];
 const THEME_ICON = { light: '☀️', sepia: '📖', dark: '🌙' };
+const themeButtons = [document.getElementById('themeBtn'), document.getElementById('themeBtnGrid')];
 
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   localStorage.setItem('ebook:theme', t);
-  document.getElementById('themeBtn').textContent = THEME_ICON[t];
+  themeButtons.forEach(b => { b.textContent = THEME_ICON[t]; });
 }
 
-document.getElementById('themeBtn').addEventListener('click', () => {
+themeButtons.forEach(btn => btn.addEventListener('click', () => {
   const cur = document.documentElement.dataset.theme;
   applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
-});
-document.getElementById('themeBtn').textContent =
-  THEME_ICON[document.documentElement.dataset.theme] || '🌙';
+}));
+applyTheme(document.documentElement.dataset.theme || 'dark');
+
+/* ---------- มุมมองตาราง ---------- */
 
 function doneCount(bookId, total) {
   try {
@@ -138,7 +296,6 @@ function updateHeroStats(books) {
 
   const container = document.getElementById('quickResumeContainer');
   if (recentBook) {
-    const total = (recentBook.chapters || []).length;
     const last = parseInt(localStorage.getItem('ebook:last:' + recentBook.id), 10) || 1;
     container.innerHTML = `
       <a href="reader.html?book=${encodeURIComponent(recentBook.id)}&ch=${last}" class="resume-btn">
@@ -232,6 +389,8 @@ async function loadShelf() {
       <p>เพิ่ม <code>&lt;section class="book"&gt;</code> ใน <code>books.html</code> หรืออัปโหลดไฟล์ใหม่ได้เลย</p>
       <a href="upload.html" class="btn primary" style="margin-top:0.5rem">＋ เพิ่มหนังสือเล่มแรก</a>
     </div>`;
+    document.getElementById('totalBooksCount').textContent = '0';
+    document.getElementById('completedCount').textContent = '0 บท';
     return;
   }
 
@@ -258,16 +417,23 @@ const searchStatus = document.getElementById('searchStatus');
 const searchResults = document.getElementById('searchResults');
 let chapterTexts = null;
 
-document.getElementById('searchBtn').addEventListener('click', () => {
-  searchPanel.classList.toggle('open');
-  if (searchPanel.classList.contains('open')) searchInput.focus();
-});
+// ค้นหาเป็นรายการยาว ๆ อ่านบนชั้น 3D ไม่ได้ — เปิดค้นหาคือย้ายไปมุมมองตาราง
+function toggleSearch(force) {
+  const open = force ?? !searchPanel.classList.contains('open');
+  searchPanel.classList.toggle('open', open);
+  if (open) {
+    setView('grid');
+    searchInput.focus();
+  }
+}
+
+document.getElementById('searchBtn').addEventListener('click', () => toggleSearch(true));
+document.getElementById('searchBtnGrid').addEventListener('click', () => toggleSearch());
 
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
-    searchPanel.classList.toggle('open');
-    if (searchPanel.classList.contains('open')) searchInput.focus();
+    toggleSearch();
   }
 });
 

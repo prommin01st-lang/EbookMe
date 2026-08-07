@@ -5,11 +5,11 @@
    - เนื้อหาบทบน Blob (cross-origin): cache-first
      ไฟล์พวกนี้ immutable (ชื่อมี timestamp, แก้บท = ไฟล์ใหม่ + ?v= ใหม่) โหลดซ้ำเปลืองเปล่า ๆ */
 
-const VERSION = 'ebookme-v2';
+const VERSION = 'ebookme-v3';
 
 const CORE = [
   'index.html', 'reader.html', 'upload.html', 'books.html',
-  'assets/app.css', 'assets/catalog.js', 'assets/marked.min.js',
+  'assets/app.css', 'assets/shelf.css', 'assets/catalog.js', 'assets/shelf.js', 'assets/marked.min.js',
   'manifest.webmanifest', 'assets/icon-192.png', 'assets/icon-512.png',
 ];
 
@@ -38,8 +38,10 @@ self.addEventListener('fetch', e => {
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
 
-    if (url.origin !== location.origin) {
-      // cache-first สำหรับไฟล์เนื้อหา/รูปบน Blob
+    // three.js ~1MB และไม่เคยเปลี่ยนในเวอร์ชันเดิม — revalidate ทุกครั้งเปลืองเปล่า
+    // อัปเกรดเวอร์ชันเมื่อไหร่ค่อยขึ้น VERSION ด้านบน cache เก่าถูกลบตอน activate อยู่แล้ว
+    if (url.origin !== location.origin || url.pathname.includes('/assets/three/')) {
+      // cache-first สำหรับไฟล์เนื้อหา/รูปบน Blob และไลบรารีที่ตรึงเวอร์ชันไว้
       const hit = await cache.match(req);
       if (hit) return hit;
       const res = await fetch(req);
