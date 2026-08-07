@@ -37,9 +37,9 @@ const TEX = {
 };
 
 const READING_THEMES = {
-  light: { paper: "#f7f2e8", wash: "255,255,255", grain: "92,76,55", ink: "#181513", exposure: 1.02, sheet: 0xf3ece0, room: 1.18 },
-  sepia: { paper: "#f0e2c6", wash: "255,248,228", grain: "120,96,58", ink: "#2b2114", exposure: 0.92, sheet: 0xeadcbe, room: 1.0 },
-  dark:  { paper: "#2b2823", wash: "180,172,158", grain: "12,10,8",  ink: "#f6f1e7", exposure: 0.66, sheet: 0x2e2a25, room: 0.34 }
+  light: { paper: "#f7f2e8", wash: "255,255,255", grain: "92,76,55", ink: "#181513", exposure: 1.02, sheet: 0xffffff, room: 1.18 },
+  sepia: { paper: "#f0e2c6", wash: "255,248,228", grain: "120,96,58", ink: "#2b2114", exposure: 0.92, sheet: 0xfffdf8, room: 1.0 },
+  dark:  { paper: "#2b2823", wash: "180,172,158", grain: "12,10,8",  ink: "#f6f1e7", exposure: 0.66, sheet: 0xffffff, room: 0.34 }
 };
 
 function readingTheme() {
@@ -3956,16 +3956,23 @@ function ensureMermaid() {
 }
 
 let mermaidSeq = 0;
+let mermaidQueue = Promise.resolve();
 
-async function renderMermaidFigure(code) {
-  try {
-    const mermaid = await ensureMermaid();
-    mermaidSeq += 1;
-    const { svg } = await mermaid.render(`shelf-mermaid-${mermaidSeq}`, code);
-    return await loadImageElement(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, false);
-  } catch {
-    return null;
-  }
+/* mermaid.render ใช้สถานะภายในร่วมกัน เรียกพร้อมกันหลายอันจะชนกันเองแล้วพังเงียบ ๆ
+   บทที่มีแผนภาพอันเดียวจึงดูปกติ แต่บทที่มีหลายอันจะหายไปเกือบหมด — ต้องต่อคิวทีละอัน */
+function renderMermaidFigure(code) {
+  const job = mermaidQueue.then(async () => {
+    try {
+      const mermaid = await ensureMermaid();
+      mermaidSeq += 1;
+      const { svg } = await mermaid.render(`shelf-mermaid-${mermaidSeq}`, code);
+      return await loadImageElement(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, false);
+    } catch {
+      return null;
+    }
+  });
+  mermaidQueue = job.then(() => undefined, () => undefined);
+  return job;
 }
 
 function absoluteUrl(src, baseUrl) {
