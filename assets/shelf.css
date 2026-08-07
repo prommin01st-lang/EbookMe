@@ -452,7 +452,10 @@ a:focus-visible {
 .detail-panel {
   position: absolute;
   top: 50%;
-  right: clamp(26px, 5vw, 78px);
+  /* จอ ultrawide: ถ้าปล่อยให้ชิดขอบขวา แผงจะห่างจากหนังสือครึ่งจอ
+     ตรึงไว้ไม่ให้เลยกรอบกลางจอกว้าง 1400px (shelf.js อ่านตำแหน่งจริงของแผง
+     ไปคำนวณจุดวางหนังสือต่อเอง หนังสือจึงขยับตามมาเอง) */
+  right: max(clamp(26px, 5vw, 78px), calc(50vw - 700px));
   z-index: 9;
   width: min(34vw, 440px);
   max-height: 82vh;
@@ -488,8 +491,13 @@ a:focus-visible {
   place-items: center;
 }
 
+/* ปุ่มปิดลอยอยู่มุมขวาบนของแผงโดยไม่กินที่ในสายข้อความ
+   บรรทัดแรกของชื่อเรื่องจึงวิ่งไปซ้อนใต้ปุ่มได้ — กันที่ให้สูงพอที่ปุ่มจะพ้นไปก่อน */
 .eyebrow {
-  margin: 0 52px 12px 0;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin: 0 56px 8px 0;
   color: var(--sh-ink-soft);
   font-size: 0.68rem;
   font-weight: 700;
@@ -872,7 +880,9 @@ body:not(.no-webgl) .fallback-note {
     top: 10px;
   }
 
+  /* จอแคบปุ่มปิดกับปุ่มย่อเรียงกันอยู่แล้ว กันที่แนวนอนพอ ไม่ต้องกันแนวตั้ง */
   .eyebrow {
+    min-height: 0;
     margin-right: 104px;
   }
 
