@@ -4274,21 +4274,31 @@ function blockRows(block) {
   const M = PAGE_M;
   const COL = PAGE_COL;
   const rows = [];
-  const push = (h, draw, group) => rows.push({ h, draw, group });
+  // keepNext = ต้องมีแถวที่วาดได้ตามหลังอยู่หน้าเดียวกันอย่างน้อยกี่แถว
+  const push = (h, draw, group, keepNext) => rows.push({ h, draw, group, keepNext });
+
+  // ย่อหน้าที่ยาวหลายบรรทัด: ห้ามทิ้งบรรทัดแรกไว้ท้ายหน้า และห้ามให้บรรทัดสุดท้ายไปโดดหน้าใหม่
+  const pushLines = (lines, h, drawLine, group) => {
+    lines.forEach((pieces, index) => {
+      const keep = lines.length > 1 && (index === 0 || index === lines.length - 2) ? 1 : 0;
+      push(h, (ctx, y) => drawLine(pieces, index, ctx, y), group, keep);
+    });
+  };
 
   if (block.kind === "heading") {
     const st = block.level === 1 ? STYLE.h1 : block.level === 2 ? STYLE.h2 : STYLE.h3;
     push(st.before, null);
     wrapRuns(block.runs, COL, st.size, 600).forEach((pieces) => {
-      push(st.lh, (ctx, y) => { ctx.globalAlpha = 1; drawRunLine(ctx, pieces, M, y + st.size * 0.78); });
+      push(st.lh, (ctx, y) => { ctx.globalAlpha = 1; drawRunLine(ctx, pieces, M, y + st.size * 0.78); }, null, 2);
     });
     push(st.after, null);
     return rows;
   }
 
   if (block.kind === "para") {
-    wrapRuns(block.runs, COL, STYLE.body.size).forEach((pieces) => {
-      push(STYLE.body.lh, (ctx, y) => { ctx.globalAlpha = 0.88; drawRunLine(ctx, pieces, M, y + 21); });
+    pushLines(wrapRuns(block.runs, COL, STYLE.body.size), STYLE.body.lh, (pieces, _i, ctx, y) => {
+      ctx.globalAlpha = 0.88;
+      drawRunLine(ctx, pieces, M, y + 21);
     });
     push(STYLE.gap, null);
     return rows;
@@ -4296,16 +4306,14 @@ function blockRows(block) {
 
   if (block.kind === "item") {
     const indent = 24 + block.depth * 22;
-    const lines = wrapRuns(block.runs, COL - indent, STYLE.body.size);
-    lines.forEach((pieces, index) => {
-      push(STYLE.body.lh, (ctx, y) => {
-        ctx.globalAlpha = 0.88;
-        if (index === 0) {
-          ctx.font = `500 17px ${SANS}`;
-          ctx.fillText(block.marker, M + block.depth * 22, y + 20);
-        }
-        drawRunLine(ctx, pieces, M + indent, y + 21);
-      });
+    // จุดนำห้ามอยู่คนละหน้ากับข้อความของข้อนั้น
+    pushLines(wrapRuns(block.runs, COL - indent, STYLE.body.size), STYLE.body.lh, (pieces, index, ctx, y) => {
+      ctx.globalAlpha = 0.88;
+      if (index === 0) {
+        ctx.font = `500 17px ${SANS}`;
+        ctx.fillText(block.marker, M + block.depth * 22, y + 20);
+      }
+      drawRunLine(ctx, pieces, M + indent, y + 21);
     });
     push(6, null);
     return rows;
@@ -4321,11 +4329,12 @@ function blockRows(block) {
         ctx.globalAlpha = 0.95;
         ctx.font = `600 13px ${SANS}`;
         ctx.fillText(CALLOUT_LABEL[block.tone] || block.tone, M + indent, y + 15);
-      }, group);
+      }, group, 1);
     }
-    wrapRuns(block.runs, COL - indent - 12, STYLE.body.size - 2).forEach((pieces) => {
-      push(27, (ctx, y) => { ctx.globalAlpha = 0.85; drawRunLine(ctx, pieces, M + indent, y + 19); }, group);
-    });
+    pushLines(wrapRuns(block.runs, COL - indent - 12, STYLE.body.size - 2), 27, (pieces, _i, ctx, y) => {
+      ctx.globalAlpha = 0.85;
+      drawRunLine(ctx, pieces, M + indent, y + 19);
+    }, group);
     push(STYLE.code.pad, null, group);
     push(STYLE.gap, null);
     return rows;
@@ -4349,12 +4358,12 @@ function blockRows(block) {
       }
     });
     push(STYLE.code.pad, null, group);
-    wrapped.forEach((text) => {
+    wrapped.forEach((text, index) => {
       push(STYLE.code.lh, (c, y) => {
         c.globalAlpha = 0.82;
         c.font = `${STYLE.code.size}px ${MONO}`;
         c.fillText(text, M + 12, y + 15);
-      }, group);
+      }, group, index === 0 && wrapped.length > 1 ? 1 : 0);
     });
     push(STYLE.code.pad, null, group);
     push(STYLE.gap, null);
@@ -4362,6 +4371,8 @@ function blockRows(block) {
   }
 
   if (block.kind === "table") {
+    groupSeq += 1;
+    const group = { id: groupSeq, deco: "table" };
     const ctx = measureContext();
     ctx.font = `${STYLE.table.size}px ${SANS}`;
     const all = [block.head, ...block.rows];
@@ -4389,9 +4400,11 @@ function blockRows(block) {
         });
         c.globalAlpha = 0.25;
         c.fillRect(PAGE_M, y + height - 1, PAGE_COL, 1);
-      });
+      }, group, head ? 1 : 0);
     };
     drawRow(block.head, true);
+    // หน้าที่ตารางไหลต่อ ต้องมีหัวตารางซ้ำ ไม่งั้นดูไม่ออกว่าคอลัมน์ไหนคืออะไร
+    group.headRow = rows[rows.length - 1];
     block.rows.forEach((row) => drawRow(row, false));
     push(STYLE.gap, null);
     return rows;
@@ -4442,6 +4455,22 @@ function drawGroupDecor(ctx, group, top, bottom, ink) {
   ctx.restore();
 }
 
+/* จุดตัดหน้าที่ "ไม่ควรตัด" — เช่นหัวตารางค้างท้ายหน้าแล้วข้อมูลไปเริ่มหน้าถัดไป
+   หรือหัวข้อโดดอยู่บรรทัดสุดท้าย หรือย่อหน้าเหลือบรรทัดเดียวข้ามหน้า
+   ไล่ย้อนจากจุดตัดกลับมาหาแถวที่สั่ง keepNext ไว้ แล้วนับว่ามีแถวตามหลังพออยู่หน้าเดียวกันไหม */
+function badBreak(rows, from, at) {
+  for (let i = at - 1; i >= from; i -= 1) {
+    const row = rows[i];
+    if (!row.draw) continue;              // ช่องว่างไม่นับ
+    const need = row.keepNext || 0;
+    if (!need) return false;
+    let have = 0;
+    for (let j = i + 1; j < at; j += 1) if (rows[j].draw) have += 1;
+    return have < need;
+  }
+  return false;
+}
+
 function paginateChapter(blocks, chapterNo, chapterTitle) {
   const rows = [];
   blocks.forEach((block) => rows.push(...blockRows(block)));
@@ -4454,20 +4483,42 @@ function paginateChapter(blocks, chapterNo, chapterTitle) {
   while (cursor < rows.length) {
     const first = pages.length === 0;
     const budget = first ? firstBudget : fullBudget;
-    const slice = [];
+    const start = cursor;
     let used = 0;
     while (cursor < rows.length) {
       const row = rows[cursor];
       if (used + row.h > budget) {
-        if (!slice.length) { slice.push(row); cursor += 1; }   // แถวเดียวสูงเกินหน้า ยอมให้ล้น
+        if (cursor === start) cursor += 1;   // แถวเดียวสูงเกินหน้า ยอมให้ล้น
         break;
       }
-      slice.push(row);
       used += row.h;
       cursor += 1;
     }
+
+    // เลื่อนจุดตัดขึ้นมาจนกว่าจะไม่ผ่ากลางของที่ต้องอยู่ด้วยกัน
+    let guard = rows.length;
+    while (cursor > start + 1 && badBreak(rows, start, cursor) && guard > 0) {
+      cursor -= 1;
+      guard -= 1;
+    }
+
+    const slice = rows.slice(start, cursor);
     // อย่าให้หน้าขึ้นต้นด้วยช่องว่างเปล่า ๆ
     while (slice.length && !slice[0].draw && !slice[0].group) slice.shift();
+
+    /* ขึ้นหน้าใหม่กลางตาราง = เติมหัวตารางซ้ำให้ แล้วถอยแถวท้ายออกเท่าที่จำเป็น
+       ไม่งั้นหน้านั้นจะเป็นตัวเลขลอย ๆ ไม่รู้ว่าคอลัมน์ไหนคืออะไร */
+    const firstRow = slice[0];
+    if (firstRow?.group?.deco === "table" && firstRow.group.headRow && firstRow !== firstRow.group.headRow) {
+      const head = firstRow.group.headRow;
+      slice.unshift(head);
+      let total = slice.reduce((sum, row) => sum + row.h, 0);
+      while (total > budget && slice.length > 2) {
+        total -= slice[slice.length - 1].h;
+        slice.pop();
+        cursor -= 1;
+      }
+    }
     pages.push({
       kind: "text",
       chapterNo,
