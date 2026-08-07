@@ -4720,9 +4720,25 @@ async function enterReading(rig, chapterNo) {
   // ระหว่างรอโหลด ผู้ใช้อาจปิดเล่มหรือเปลี่ยนไปเล่มอื่นแล้ว
   if (activeBook !== rig) return false;
   if (!blocks) {
-    renderBrowsePages(rig);
+    /* ดึงเนื้อหาไม่ได้ (ไฟล์หาย/รูปแบบอ่านไม่ออก) ก็ยังต้องมีสถานะการอ่านอยู่
+       ไม่งั้น rig.reading = null ค้าง แล้วปุ่มพลิกหน้ากับเปลี่ยนบทตายทั้งหมด */
+    const fallback = browsePageSpecs(book);
+    fallback.count = fallback.length;
+    while (fallback.length % PAGE_FACES !== 0) fallback.push({ kind: "blank" });
+    rig.reading = {
+      chapterNo: no,
+      title: book.chapterTitles[no - 1] || `บทที่ ${no}`,
+      specs: fallback,
+      count: fallback.count,
+      batch: 0,
+      batches: 1,
+      folio: 0,
+      failed: true
+    };
+    renderReadingBatch(rig, 0);
+    goToFolio(0, true);
     updatePageControls(false);
-    return false;
+    return true;
   }
 
   const pages = paginateChapter(blocks, no, book.chapterTitles[no - 1] || `บทที่ ${no}`);
@@ -4844,18 +4860,33 @@ function readingFolioRange() {
   return [left, right];
 }
 
+let switchingChapter = false;
+
 async function goToChapter(direction) {
   const rig = activeBook;
-  if (!rig?.reading) return;
+  // กดรัว ๆ ตอนบทกำลังโหลด จะทำให้สองรอบชนกันแล้วสถานะพัง
+  if (!rig?.reading || switchingChapter) return;
   const target = rig.reading.chapterNo + direction;
   if (target < 1 || target > rig.data.chapterPaths.length) return;
+
+  switchingChapter = true;
+  const previous = rig.reading;
   rig.reading = null;
-  const ok = await enterReading(rig, target);
-  if (!ok) return;
-  currentSpread = direction > 0 ? 0 : SPREAD_COUNT - 1;
-  snapPages = true;
-  updatePageControls(true);
-  requestFrame();
+  try {
+    const ok = await enterReading(rig, target);
+    if (!ok || activeBook !== rig) {
+      rig.reading = rig.reading || previous;   // เข้าบทใหม่ไม่ได้ ให้กลับไปสถานะเดิม
+      updatePageControls(false);
+      return;
+    }
+    // ถอยกลับ = ควรไปโผล่ที่หน้าสุดท้ายของบทก่อนหน้า ไม่ใช่หน้าแรก
+    if (direction < 0) goToFolio(rig.reading.count - 1, true);
+    rig.data.lastChapter = target;
+    populateDetail(rig.data);
+    updatePageControls(true);
+  } finally {
+    switchingChapter = false;
+  }
 }
 
 function openDetail(origin = inspectButton) {
