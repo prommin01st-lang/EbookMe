@@ -2986,12 +2986,18 @@ function setReadingOpen(open, announce = true) {
   if (mode !== "detail" || readingOpen === open) return;
   cancelPageDrag();
   readingOpen = open;
-  if (!readingOpen) currentSpread = 0;
+  if (!readingOpen) {
+    currentSpread = 0;
+    detailPanel.classList.remove("is-minimal"); // ปิดเล่มแล้วกลับไปดูข้อมูลเล่มตามปกติ
+  }
   // เปิดเล่มเมื่อไหร่ค่อยไปดึงเนื้อหาบทมาวาด ไม่ต้องโหลดตั้งแต่ตอนเลื่อนดูบนชั้น
   if (readingOpen && activeBook) {
-    // เปิดอ่านคือมาอ่าน ไม่ได้มาดูข้อมูลเล่ม — หุบรายละเอียดไว้ก่อน กดกางเมื่อไหร่ก็ได้
-    detailPanel.classList.add("is-collapsed");
-    panelToggle?.setAttribute("aria-expanded", "false");
+    /* เปิดอ่านคือมาอ่าน ไม่ได้มาดูข้อมูลเล่ม — ยุบเหลือปุ่มลอยไว้ก่อน
+       ผู้ใช้เคยตั้งไว้แบบไหนก็จำไว้ */
+    const saved = localStorage.getItem("ebook:readPanel") || "minimal";
+    detailPanel.classList.toggle("is-minimal", saved === "minimal");
+    detailPanel.classList.toggle("is-collapsed", saved !== "open");
+    panelToggle?.setAttribute("aria-expanded", String(saved === "open"));
     enterReading(activeBook, activeBook.data.lastChapter || 1);
     setTimeout(() => frameOpenSpread(true), 700); // รอปกกางสุดก่อนค่อยวัดขนาด
   } else {
@@ -4451,7 +4457,10 @@ let spreadPreference = localStorage.getItem("ebook:shelf3dSpread") || "auto";
 function wantsOnePage() {
   if (spreadPreference === "one") return true;
   if (spreadPreference === "two") return false;
-  return viewWidth < 720 && isPortraitLayout();
+  /* จอแนวตั้งกางสองหน้าคู่แล้วเสียความสูงไปครึ่งจอเสมอ เพราะสเปรดกว้างกว่าสูง
+     กรอบจึงถูกจำกัดด้วยความกว้าง ตัวหนังสือเล็กทั้งที่ยังมีที่เหลืออีกเยอะ
+     — แนวตั้งอ่านทีละหน้าคุ้มกว่า (กดปุ่ม "หน้าคู่" บังคับได้ถ้าไม่ชอบ) */
+  return isPortraitLayout();
 }
 
 function setSpreadPreference(value) {
@@ -5138,6 +5147,8 @@ async function initialize() {
     goToChapter,
     toggleReading: (open) => setReadingOpen(open),
     isReading: () => mode === "detail" && readingOpen,
+    // ขนาดแผงเปลี่ยน = พื้นที่ว่างเปลี่ยน กล้องต้องวัดกรอบใหม่
+    refit: () => requestAnimationFrame(() => { if (!frameOpenSpread(false)) resetInspectionView(); }),
     close: () => {
       if (mode === "detail") closeDetail();
     },

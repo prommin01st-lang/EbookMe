@@ -672,6 +672,10 @@ a:focus-visible {
   transform: rotate(180deg);
 }
 
+.detail-panel.is-minimal .panel-toggle svg {
+  transform: rotate(0deg);
+}
+
 .detail-body {
   overflow: hidden;
 }
@@ -971,9 +975,89 @@ body:not(.no-webgl) .fallback-note {
 }
 
 
+/* ---------- สถานะที่สาม: ยุบเหลือปุ่มลอย ----------
+   แม้จะหุบแล้ว แถบล่างจอก็ยังกินความสูงร่วมร้อยพิกเซล ซึ่งบนแท็บเล็ตแนวตั้ง
+   คือพื้นที่อ่านที่หายไปจริง ๆ สถานะนี้เหลือแค่ปิดเล่ม เลขหน้า และลูกศรพลิก
+   ทุกอย่างที่เหลือรอให้กดกางกลับมา */
+.detail-panel.as-sheet.is-minimal {
+  right: auto;
+  left: 50%;
+  width: auto;
+  max-height: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  transform: translateX(-50%) translateY(18px);
+}
+
+.mode-detail .detail-panel.as-sheet.is-minimal {
+  transform: translateX(-50%) translateY(0);
+}
+
+.detail-panel.as-sheet.is-minimal .eyebrow,
+.detail-panel.as-sheet.is-minimal .detail-title,
+.detail-panel.as-sheet.is-minimal .detail-body,
+.detail-panel.as-sheet.is-minimal .chapter-nav,
+.detail-panel.as-sheet.is-minimal .detail-controls {
+  display: none;
+}
+
+/* ปุ่มปิด/ปุ่มกาง เลิกลอยมุมแล้วมาเรียงในแถวเดียวกับลูกศร */
+.detail-panel.as-sheet.is-minimal .close-button,
+.detail-panel.as-sheet.is-minimal .panel-toggle {
+  position: static;
+  order: 0;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  border: 0;
+}
+
+.detail-panel.as-sheet.is-minimal .panel-toggle {
+  order: 2;
+  display: grid;
+}
+
+.detail-panel.as-sheet.is-minimal .page-navigation {
+  order: 1;
+  grid-template-columns: 40px minmax(0, auto) 40px;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.detail-panel.as-sheet.is-minimal .page-button {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  border: 0;
+}
+
+.detail-panel.as-sheet.is-minimal .page-status strong {
+  display: none;
+}
+
+.detail-panel.as-sheet.is-minimal .page-status {
+  padding: 0 6px;
+}
+
+.detail-panel.as-sheet.is-minimal .page-status span {
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.detail-panel.as-sheet.is-minimal .panel-toggle svg {
+  transform: rotate(0deg);
+}
+
 /* จอกว้าง: แผ่นล่างจอไม่ต้องยืดเต็มความกว้าง จัดกลางไว้ใต้หนังสือ */
 @media (min-width: 901px) {
-  .detail-panel.as-sheet {
+  .detail-panel.as-sheet:not(.is-minimal) {
     right: auto;
     left: 50%;
     width: min(860px, calc(100vw - 64px));
