@@ -2892,6 +2892,8 @@ function updateSelection(index, announce = false) {
     }
   });
 
+  schedulePrewarm();
+
   if (announce) {
     liveRegion.textContent = `เลือกเล่มที่ ${selectedIndex + 1} จาก ${BOOKS.length}: ${book.title}. ${book.note}`;
   }
@@ -3068,6 +3070,7 @@ function setReadingOpen(open, announce = true) {
     detailPanel.classList.toggle("is-minimal", saved === "minimal");
     detailPanel.classList.toggle("is-collapsed", saved !== "open");
     panelToggle?.setAttribute("aria-expanded", String(saved === "open"));
+    flushInspectAssets(activeBook);   // ปกกำลังจะกาง ใบรองปกต้องพร้อมแล้ว
     enterReading(activeBook, activeBook.data.lastChapter || 1);
     setTimeout(() => frameOpenSpread(true), 700); // รอปกกางสุดก่อนค่อยวัดขนาด
   } else {
@@ -3657,6 +3660,7 @@ function onPagePointerDown(event) {
       ? "cover-close"
       : "cover-open"
     : "page";
+  if (pageDrag.kind === "cover-open") flushInspectAssets(activeBook);
   controls.enabled = false;
   canvas.classList.add("has-page-hover", "is-page-dragging");
   canvas.setPointerCapture?.(event.pointerId);
@@ -4276,12 +4280,14 @@ async function loadChapterText(book, chapterNo) {
    ส่วนที่ตกอยู่บนหน้านั้น — โค้ดยาวข้ามหน้าจึงยังมีกรอบต่อเนื่องทั้งสองหน้า */
 
 /* ขนาดตัวอักษรใช้ค่าเดียวกับหน้าอ่าน 2D (ebook:fontSize) จะได้ไม่ต้องตั้งสองที่
-   17 คือค่ากลาง ปรับได้ 14–26 แล้วสเกลทั้งชุดตามกัน */
+   ปรับได้ 14–26 แล้วสเกลทั้งชุดตามกัน — 17 คือขนาดที่ STYLE_BASE ออกแบบไว้
+   ส่วนค่าเริ่มต้นถ้ายังไม่เคยตั้งคือ 14 เพราะหน้าในหนังสือเล็กกว่าจอ ตัวโตกว่านี้กินที่เกิน */
 const BASE_READER_FONT = 17;
+const DEFAULT_READER_FONT = 14;
 
 function readerFontSize() {
   const value = parseInt(localStorage.getItem("ebook:fontSize"), 10);
-  return value >= 14 && value <= 26 ? value : BASE_READER_FONT;
+  return value >= 14 && value <= 26 ? value : DEFAULT_READER_FONT;
 }
 
 function fontScale() {
@@ -4766,28 +4772,111 @@ function renderReadingBatch(rig, batch) {
 
 /* สร้างภาพที่ใช้เฉพาะตอนหยิบเล่มออกมาดู — เรียกครั้งเดียวต่อเล่ม
    นี่คือส่วนที่ทำให้หน่วยความจำ GPU ไม่บวมตามจำนวนหนังสือบนชั้น */
+/* พื้นผิวฝั่งหลังปกกับใบรองปก — ของเดิมสร้างรวดเดียวในจังหวะที่กด "เปิดดู"
+   วัดบนมือถือ (จำลอง CPU ช้า 4 เท่า) ตัวจัดการคลิกกินไป 68ms แล้วเฟรมแรกของ
+   แอนิเมชันอีก 111ms เพราะต้องอัปโหลดพื้นผิวสี่ผืนขึ้น GPU พร้อมกัน — เห็นเป็น
+   ภาพกระตุกตอนหนังสือลอยออกมา ทั้งที่ของพวกนี้ยังไม่ทันได้เห็นสักชิ้น (ปกยังปิดอยู่)
+   ตอนนี้ทยอยสร้างทีละผืนในเฟรมว่าง และรีบสร้างให้ครบเมื่อจะเปิดปกจริง */
 function ensureInspectAssets(rig) {
   if (rig.inspectReady) return;
   rig.inspectReady = true;
   const book = rig.data;
+  const stale = rig.lazyTextures || [];
+  rig.lazyTextures = [];
+  rig.assetSteps = [
+    () => {
+      const back = makeBackCoverTexture(book);
+      rig.backArt.map = back;
+      rig.backArt.color.setHex(0xffffff);
+      rig.backArt.needsUpdate = true;
+      rig.lazyTextures.push(back);
+    },
+    () => {
+      const foil = makeBackFoilTexture(book);
+      rig.backFoilSource = foil;
+      rig.backFoilArt.map = foil;
+      rig.backFoilArt.alphaMap = foil;
+      rig.backFoilArt.needsUpdate = true;
+      rig.lazyTextures.push(foil);
+    },
+    () => {
+      const emboss = makeEmbossMap(rig.backFoilSource, `${book.id}-back-foil-emboss`);
+      rig.backFoilArt.bumpMap = emboss;
+      rig.backFoilArt.needsUpdate = true;
+      rig.lazyTextures.push(emboss);
+    },
+    () => {
+      const endpaper = makeEndpaperTexture(book);
+      rig.endpaperMaterial.map = endpaper;
+      rig.endpaperMaterial.needsUpdate = true;
+      rig.lazyTextures.push(endpaper);
+      // ของชุดก่อน (เช่นหลังเปลี่ยนธีม) ปล่อยทิ้งได้แล้วเพราะไม่มีวัสดุไหนอ้างถึงอีก
+      stale.forEach((texture) => texture?.dispose());
+    }
+  ];
+  scheduleInspectAssets(rig);
+}
 
-  const back = makeBackCoverTexture(book);
-  const backFoil = makeBackFoilTexture(book);
-  const backEmboss = makeEmbossMap(backFoil, `${book.id}-back-foil-emboss`);
-  const endpaper = makeEndpaperTexture(book);
+function scheduleInspectAssets(rig) {
+  if (!rig.assetSteps?.length || rig.assetTimer) return;
+  const run = () => {
+    rig.assetTimer = 0;
+    const step = rig.assetSteps?.shift();
+    if (!step) return;
+    step();
+    requestFrame();
+    scheduleInspectAssets(rig);
+  };
+  rig.assetTimer = typeof requestIdleCallback === "function"
+    ? requestIdleCallback(run, { timeout: 500 })
+    : setTimeout(run, 90);
+}
 
-  rig.backArt.map = back;
-  rig.backArt.color.setHex(0xffffff);
-  rig.backArt.needsUpdate = true;
-  rig.backFoilArt.map = backFoil;
-  rig.backFoilArt.alphaMap = backFoil;
-  rig.backFoilArt.bumpMap = backEmboss;
-  rig.backFoilArt.needsUpdate = true;
-  rig.endpaperMaterial.map = endpaper;
-  rig.endpaperMaterial.needsUpdate = true;
-
-  rig.lazyTextures = [back, backFoil, backEmboss, endpaper];
+// จะเปิดปกแล้ว รอเฟรมว่างไม่ได้ — ที่เหลือสร้างให้ครบเดี๋ยวนี้
+function flushInspectAssets(rig) {
+  if (!rig?.assetSteps?.length) return;
+  while (rig.assetSteps.length) rig.assetSteps.shift()();
   requestFrame();
+}
+
+function releaseInspectAssets(rig) {
+  if (!rig?.inspectReady || rig === activeBook) return;
+  if (rig.assetTimer) {
+    if (typeof cancelIdleCallback === "function") cancelIdleCallback(rig.assetTimer);
+    else clearTimeout(rig.assetTimer);
+    rig.assetTimer = 0;
+  }
+  rig.assetSteps = null;
+  rig.inspectReady = false;
+  disposeLazyTextures(rig);
+  rig.backFoilSource = null;
+  rig.backArt.map = null;
+  rig.backArt.needsUpdate = true;
+  rig.backFoilArt.map = null;
+  rig.backFoilArt.alphaMap = null;
+  rig.backFoilArt.bumpMap = null;
+  rig.backFoilArt.needsUpdate = true;
+  rig.endpaperMaterial.map = null;
+  rig.endpaperMaterial.needsUpdate = true;
+}
+
+/* เตรียมของไว้ล่วงหน้าให้เล่มที่เลือกค้างไว้ ตอนอยู่บนชั้นเฉย ๆ ฉากว่างพออยู่แล้ว
+   กดเปิดดูจะได้ไม่ต้องสร้างอะไรเลย แอนิเมชันหยิบหนังสือจึงไม่มีจังหวะสะดุด
+   เก็บไว้แค่สามเล่มล่าสุด เลื่อนดูทั้งชั้นจะได้ไม่กินหน่วยความจำไปเรื่อย ๆ */
+let prewarmTimer = 0;
+let prewarmed = [];
+
+function schedulePrewarm() {
+  clearTimeout(prewarmTimer);
+  prewarmTimer = setTimeout(() => {
+    if (mode !== "hero" || suspended) return;
+    const rig = bookRigs[selectedIndex];
+    if (!rig || rig.inspectReady) return;
+    ensureInspectAssets(rig);
+    prewarmed = prewarmed.filter((entry) => entry !== rig);
+    prewarmed.push(rig);
+    while (prewarmed.length > 3) releaseInspectAssets(prewarmed.shift());
+  }, 900);
 }
 
 // หน้าในแบบ "เปิดดูเฉย ๆ" ใช้ตอนดึงเนื้อหาบทไม่สำเร็จ
