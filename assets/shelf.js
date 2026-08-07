@@ -37,9 +37,9 @@ const TEX = {
 };
 
 const READING_THEMES = {
-  light: { paper: "#f7f2e8", wash: "255,255,255", grain: "92,76,55", ink: "#241f1a", exposure: 1.02, sheet: 0xf3ece0, room: 1.18 },
-  sepia: { paper: "#f0e2c6", wash: "255,248,228", grain: "120,96,58", ink: "#3b2f1c", exposure: 0.92, sheet: 0xeadcbe, room: 1.0 },
-  dark:  { paper: "#2b2823", wash: "180,172,158", grain: "12,10,8",  ink: "#ece5d8", exposure: 0.66, sheet: 0x2e2a25, room: 0.34 }
+  light: { paper: "#f7f2e8", wash: "255,255,255", grain: "92,76,55", ink: "#181513", exposure: 1.02, sheet: 0xf3ece0, room: 1.18 },
+  sepia: { paper: "#f0e2c6", wash: "255,248,228", grain: "120,96,58", ink: "#2b2114", exposure: 0.92, sheet: 0xeadcbe, room: 1.0 },
+  dark:  { paper: "#2b2823", wash: "180,172,158", grain: "12,10,8",  ink: "#f6f1e7", exposure: 0.66, sheet: 0x2e2a25, room: 0.34 }
 };
 
 function readingTheme() {
@@ -2920,13 +2920,21 @@ function updatePageControls(announce = false) {
   const previousDisabled = interactionLocked || atFirst;
   const nextDisabled = interactionLocked || atLast;
 
-  previousPageButton.disabled = previousDisabled;
-  nextPageButton.disabled = nextDisabled;
+  const hasNextChapter = !!reading && reading.chapterNo < book.chapterCount;
+  const hasPrevChapter = !!reading && reading.chapterNo > 1;
+  previousPageButton.disabled = previousDisabled && !hasPrevChapter;
+  nextPageButton.disabled = nextDisabled && !hasNextChapter;
 
   if (chapterPrevButton && chapterNextButton) {
     const chapterNo = reading?.chapterNo || 0;
     chapterPrevButton.disabled = !reading || chapterNo <= 1;
     chapterNextButton.disabled = !reading || chapterNo >= book.chapterCount;
+  }
+  // บอกให้รู้ว่าพลิกต่อจากหน้าสุดท้ายแล้วจะข้ามบทให้เอง
+  if (nextPageButton) {
+    nextPageButton.title = atLast && reading && reading.chapterNo < book.chapterCount
+      ? `ไปบทที่ ${reading.chapterNo + 1}`
+      : "หน้าถัดไป";
   }
 
   pageLabel.textContent = readingOpen
@@ -3027,11 +3035,14 @@ function turnPage(direction) {
   if (wantsOnePage()) {
     const nextFace = currentFace() + direction;
     if (nextFace < 0 || nextFace >= PAGE_FACES) {
-      shiftReadingBatch(direction);
+      if (!shiftReadingBatch(direction)) goToChapter(direction);
       return;
     }
-    // หน้าเติมท้ายชุดไม่ใช่หน้าของบท อย่าพาไป
-    if (reading && reading.batch * PAGE_FACES + nextFace > lastFolio) return;
+    // หน้าเติมท้ายชุดไม่ใช่หน้าของบท — สุดบทแล้วให้ไปบทถัดไปเลย
+    if (reading && reading.batch * PAGE_FACES + nextFace > lastFolio) {
+      goToChapter(direction);
+      return;
+    }
     const at = faceToPosition(nextFace);
     const flips = at.spread !== currentSpread;
     currentSpread = at.spread;
@@ -3044,14 +3055,18 @@ function turnPage(direction) {
   }
 
   const nextSpread = currentSpread + direction;
-  // สุดชุดแล้วยังพลิกต่อ = ข้ามไปอีก 8 หน้าถัดไปของบทเดียวกัน
+  /* สุดชุดแล้วยังพลิกต่อ = ข้ามไปอีก 8 หน้าถัดไป ถ้าหมดบทแล้วก็ไปบทถัดไปเลย
+     ปุ่มเปลี่ยนบทอยู่ในแผงที่ถูกยุบตอนอ่าน การพลิกต่อจึงต้องพาข้ามบทได้เอง */
   if (nextSpread < 0 || nextSpread >= SPREAD_COUNT) {
-    shiftReadingBatch(direction);
+    if (!shiftReadingBatch(direction)) goToChapter(direction);
     return;
   }
   if (reading && direction > 0) {
     const face = nextSpread === SPREAD_COUNT - 1 ? PAGE_FACES - 1 : nextSpread * 2 - 1;
-    if (reading.batch * PAGE_FACES + face > lastFolio) return;
+    if (reading.batch * PAGE_FACES + face > lastFolio) {
+      goToChapter(direction);
+      return;
+    }
   }
   currentSpread = nextSpread;
   readingFocus = direction > 0 ? 1 : -1;
@@ -3886,7 +3901,7 @@ const readingCache = new Map();
    ต้นฉบับยัดทุกอย่างเป็นข้อความล้วนก้อนเดียว หัวข้อ ลิสต์ ตาราง โค้ด และกล่องหมายเหตุ
    จึงกลายเป็นย่อหน้าเหมือนกันหมด หรือหายไปเลย ที่นี่แยกเป็นบล็อกแล้ววาดตามชนิด */
 
-const MONO = 'ui-monospace, "SF Mono", "JetBrains Mono", Consolas, monospace';
+const MONO = 'ui-monospace, "SF Mono", "JetBrains Mono", Consolas, "Noto Sans Thai", monospace';
 const FIGURE_MAX_H = 430;
 const FIGURE_GAP = 18;
 
@@ -3964,35 +3979,39 @@ function absoluteUrl(src, baseUrl) {
 /* ---------- ข้อความในบรรทัด ----------
    คืนค่าเป็น "run" ที่มีสไตล์ติดมาด้วย เพื่อให้ตัวหนากับโค้ดในบรรทัดยังเห็นต่างกัน
    (ของเดิม regex กิน `inline code` หายไปทั้งคำ) */
+/* แยกข้อความหนึ่งย่อหน้าออกเป็น run ตามสไตล์
+   ของเดิมใช้ regex ที่มีทางเลือกสุดท้ายเป็น [^]* ซึ่ง match ได้ตั้งแต่ตำแหน่ง 0
+   ทั้งย่อหน้าจึงถูกกลืนเป็นก้อนเดียวและติดสไตล์ผิด แถมวนไม่รู้จบเมื่อสตริงว่าง
+   คราวนี้สแกนด้วย regex แบบ global แล้วเก็บช่วงระหว่าง match เป็นข้อความธรรมดา */
 function parseInline(src) {
-  const runs = [];
-  let rest = String(src ?? "")
+  const text = String(src ?? "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\$\$([\s\S]*?)\$\$/g, (_, m) => `${m.trim()}`)
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => `${m.trim()}`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_, m) => `${m.trim()}`)
-    .replace(/\$(?!\d)([^$\n]{1,200})\$/g, (_, m) => `${m.trim()}`)
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_, m) => m.trim())
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, m) => m.trim())
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, m) => m.trim())
+    .replace(/\$(?!\d)([^$\n]{1,200})\$/g, (_, m) => m.trim())
     .replace(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]{0,300})?\/?>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
 
-  const re = /`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|([^]*)/;
-  let m = re.exec(rest);
+  const runs = [];
+  const re = /`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*/g;
+  let last = 0;
+  let m = re.exec(text);
   while (m) {
-    if (m.index > 0) runs.push({ s: rest.slice(0, m.index), style: "" });
+    if (m.index > last) runs.push({ s: text.slice(last, m.index), style: "" });
     if (m[1] !== undefined) runs.push({ s: m[1], style: "code" });
     else if (m[2] !== undefined) runs.push({ s: m[2], style: "bold" });
     else if (m[3] !== undefined) runs.push({ s: m[3], style: "bold" });
-    else if (m[4] !== undefined) runs.push({ s: m[4], style: "italic" });
-    else runs.push({ s: m[5], style: "math" });
-    rest = rest.slice(m.index + m[0].length);
-    m = re.exec(rest);
+    else runs.push({ s: m[4], style: "italic" });
+    last = re.lastIndex;
+    m = re.exec(text);
   }
-  if (rest) runs.push({ s: rest, style: "" });
-  return runs.filter((r) => r.s !== "");
+  if (last < text.length) runs.push({ s: text.slice(last), style: "" });
+  return runs.filter((run) => run.s !== "");
 }
 
 function runsText(runs) {
@@ -4233,7 +4252,6 @@ function fontFor(style, size, weight) {
   if (style === "code") return `${size - 3}px ${MONO}`;
   if (style === "bold") return `700 ${size}px ${SERIF}`;
   if (style === "italic") return `italic ${size}px ${SERIF}`;
-  if (style === "math") return `italic ${size - 1}px ${MONO}`;
   return `${weight || 400} ${size}px ${SERIF}`;
 }
 
@@ -4287,13 +4305,14 @@ function blockRows(block) {
   const COL = PAGE_COL;
   const rows = [];
   // keepNext = ต้องมีแถวที่วาดได้ตามหลังอยู่หน้าเดียวกันอย่างน้อยกี่แถว
-  const push = (h, draw, group, keepNext) => rows.push({ h, draw, group, keepNext });
+  const push = (h, draw, group, keepNext, text) => rows.push({ h, draw, group, keepNext, text });
 
   // ย่อหน้าที่ยาวหลายบรรทัด: ห้ามทิ้งบรรทัดแรกไว้ท้ายหน้า และห้ามให้บรรทัดสุดท้ายไปโดดหน้าใหม่
   const pushLines = (lines, h, drawLine, group) => {
     lines.forEach((pieces, index) => {
       const keep = lines.length > 1 && (index === 0 || index === lines.length - 2) ? 1 : 0;
-      push(h, (ctx, y) => drawLine(pieces, index, ctx, y), group, keep);
+      const chars = pieces.reduce((n, piece) => n + piece.s.length, 0);
+      push(h, (ctx, y) => drawLine(pieces, index, ctx, y), group, keep, chars);
     });
   };
 
@@ -4301,7 +4320,8 @@ function blockRows(block) {
     const st = block.level === 1 ? STYLE.h1 : block.level === 2 ? STYLE.h2 : STYLE.h3;
     push(st.before, null);
     wrapRuns(block.runs, COL, st.size, 600).forEach((pieces) => {
-      push(st.lh, (ctx, y) => { ctx.globalAlpha = 1; drawRunLine(ctx, pieces, M, y + st.size * 0.78); }, null, 2);
+      push(st.lh, (ctx, y) => { ctx.globalAlpha = 1; drawRunLine(ctx, pieces, M, y + st.size * 0.78); }, null, 2,
+        pieces.reduce((n, piece) => n + piece.s.length, 0));
     });
     push(st.after, null);
     return rows;
@@ -4375,7 +4395,7 @@ function blockRows(block) {
         c.globalAlpha = 0.96;
         c.font = `${STYLE.code.size}px ${MONO}`;
         c.fillText(text, M + 12, y + 15);
-      }, group, index === 0 && wrapped.length > 1 ? 1 : 0);
+      }, group, index === 0 && wrapped.length > 1 ? 1 : 0, text.length);
     });
     push(STYLE.code.pad, null, group);
     push(STYLE.gap, null);
@@ -4412,7 +4432,7 @@ function blockRows(block) {
         });
         c.globalAlpha = 0.25;
         c.fillRect(PAGE_M, y + height - 1, PAGE_COL, 1);
-      }, group, head ? 1 : 0);
+      }, group, head ? 1 : 0, row.join("").length);
     };
     drawRow(block.head, true);
     // หน้าที่ตารางไหลต่อ ต้องมีหัวตารางซ้ำ ไม่งั้นดูไม่ออกว่าคอลัมน์ไหนคืออะไร
