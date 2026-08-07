@@ -37,9 +37,9 @@ const TEX = {
 };
 
 const READING_THEMES = {
-  light: { paper: "#f7f2e8", wash: "255,255,255", grain: "92,76,55", ink: "#181513", exposure: 1.02, sheet: 0xffffff, room: 1.18 },
+  light: { paper: "#f7f2e8", wash: "255,255,255", grain: "92,76,55", ink: "#181513", exposure: 1.06, sheet: 0xffffff, room: 1.3 },
   sepia: { paper: "#f0e2c6", wash: "255,248,228", grain: "120,96,58", ink: "#2b2114", exposure: 0.92, sheet: 0xfffdf8, room: 1.0 },
-  dark:  { paper: "#2b2823", wash: "180,172,158", grain: "12,10,8",  ink: "#f6f1e7", exposure: 0.66, sheet: 0xffffff, room: 0.34 }
+  dark:  { paper: "#2b2823", wash: "180,172,158", grain: "12,10,8",  ink: "#f6f1e7", exposure: 0.58, sheet: 0xffffff, room: 0.16 }
 };
 
 function readingTheme() {
@@ -2323,6 +2323,7 @@ function createBookRig(book, index) {
     paperFaceTexture,
     interiorPageTextures,
     interiorPageMaterials,
+    blankPageMaterial,
     backArt,
     backFoilArt,
     endpaperMaterial,
@@ -2714,17 +2715,39 @@ function applyReadingTheme() {
   shared.page.needsUpdate = true;
   shared.pageSheet.needsUpdate = true;
 
-  // เท็กซ์เจอร์กระดาษที่แคชไว้ใช้สีธีมเดิม ต้องทิ้งให้สร้างใหม่
-  sharedPaperFaceTexture?.dispose();
+  /* พื้นกระดาษเปล่ามีสีของธีมอบอยู่ในเท็กซ์เจอร์ ต้องสร้างใหม่แล้ว "ผูกกลับ" ให้วัสดุ
+     ที่ยังใช้อยู่ ของเดิม dispose ทิ้งเฉย ๆ วัสดุจึงค้างอยู่กับเท็กซ์เจอร์ที่ถูกทำลายไปแล้ว */
+  const previousFace = sharedPaperFaceTexture;
   sharedPaperFaceTexture = null;
-  if (sharedPageEdgeTextures) {
-    Object.values(sharedPageEdgeTextures).forEach((texture) => texture?.dispose());
-    sharedPageEdgeTextures = null;
-  }
+  const nextFace = makePaperFaceTexture(BOOKS[selectedIndex] || BOOKS[0]);
+  bookRigs.forEach((rig) => {
+    rig.interiorPageMaterials.forEach((material) => {
+      if (material.map === previousFace) material.map = nextFace;
+      material.bumpMap = nextFace;
+      material.needsUpdate = true;
+    });
+    if (rig.blankPageMaterial) {
+      rig.blankPageMaterial.map = nextFace;
+      rig.blankPageMaterial.bumpMap = nextFace;
+      rig.blankPageMaterial.needsUpdate = true;
+    }
+    // ใบรองปกก็มีสีธีมอยู่ในภาพ ให้สร้างใหม่ตอนหยิบเล่มออกมาครั้งถัดไป
+    if (rig !== activeBook) rig.inspectReady = false;
+  });
+  previousFace?.dispose();
 
   shadowDirty = true;
   if (BOOKS[selectedIndex]) applyBookTheme(BOOKS[selectedIndex]);
-  if (activeBook?.reading) renderReadingBatch(activeBook, activeBook.reading.batch);
+
+  if (activeBook) {
+    // ใบรองปกของเล่มที่เปิดอยู่ต้องเปลี่ยนทันที ไม่ใช่รอเปิดใหม่
+    activeBook.endpaperMaterial.map?.dispose();
+    activeBook.endpaperMaterial.map = makeEndpaperTexture(activeBook.data);
+    activeBook.endpaperMaterial.needsUpdate = true;
+    // หน้าที่เห็นอยู่ตอนนี้ต้องวาดใหม่ ไม่ว่ากำลังอ่านหรือแค่เปิดดู
+    if (activeBook.reading) renderReadingBatch(activeBook, activeBook.reading.batch);
+    else if (activeBook.readingTextures?.length) renderBrowsePages(activeBook);
+  }
   requestFrame();
 }
 
@@ -2759,10 +2782,12 @@ function applyBookTheme(book) {
   themeTargets.shelfDark.set(palette.shelfDark).multiplyScalar(dim);
   themeTargets.shadow.set(palette.shelfDark).multiplyScalar(dim);
   themeTargets.fog.set(palette.wall).multiplyScalar(dim);
-  themeTargets.hemisphere.set(palette.paperPale).multiplyScalar(Math.min(1.1, dim));
+  // ไฟหรี่ตามธีมด้วย แต่ไม่ถึงกับมืดสนิทจนมองหนังสือไม่เห็น
+  const lightDim = clamp(dim, 0.5, 1.15);
+  themeTargets.hemisphere.set(palette.paperPale).multiplyScalar(lightDim);
   themeTargets.hemisphereGround.set(palette.shelf).multiplyScalar(dim);
-  themeTargets.key.set(palette.light).multiplyScalar(Math.min(1.1, dim));
-  themeTargets.fill.set(palette.fill).multiplyScalar(Math.min(1.1, dim));
+  themeTargets.key.set(palette.light).multiplyScalar(lightDim);
+  themeTargets.fill.set(palette.fill).multiplyScalar(lightDim);
   themeTargets.rim.set(book.accent || book.foil);
 
   if (!themeInitialized || reducedMotion) {
