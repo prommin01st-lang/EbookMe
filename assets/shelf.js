@@ -2912,8 +2912,9 @@ function updatePageControls(announce = false) {
   const interactionLocked = mode !== "detail" || !readingOpen;
   const onePageNow = wantsOnePage();
   const face = currentFace();
-  const atFirst = (onePageNow ? face === 0 : currentSpread === 0)
-    && (reading ? reading.batch === 0 : true);
+  const atFirst = reading
+    ? readingFolioRange()[0] <= 0
+    : (onePageNow ? face === 0 : currentSpread === 0);
   const atLast = reading
     ? readingFolioRange()[1] >= reading.count - 1
     : (onePageNow ? face === PAGE_FACES - 1 : currentSpread === SPREAD_COUNT - 1);
@@ -3024,55 +3025,17 @@ function setReadingOpen(open, announce = true) {
 
 function turnPage(direction) {
   if (mode !== "detail" || !readingOpen) return;
-
-  /* โหมดหน้าเดียวต้องเดินทีละ "หน้า" ไม่ใช่ทีละ "สเปรด"
-     เพราะพลิกกระดาษหนึ่งใบเผยหน้าใหม่สองหน้า ถ้าเลื่อนทีละสเปรดแล้วเล็งแต่หน้าขวา
-     หน้าซ้ายจะถูกข้ามไปเลย — ผู้ใช้อ่านไม่ครบครึ่งเล่ม
-     ขวาของสเปรดนี้ → ซ้ายของสเปรดถัดไป → ขวาของสเปรดถัดไป */
   const reading = activeBook?.reading;
-  const lastFolio = reading ? reading.count - 1 : Infinity;
+  if (!reading) return;
 
-  if (wantsOnePage()) {
-    const nextFace = currentFace() + direction;
-    if (nextFace < 0 || nextFace >= PAGE_FACES) {
-      if (!shiftReadingBatch(direction)) goToChapter(direction);
-      return;
-    }
-    // หน้าเติมท้ายชุดไม่ใช่หน้าของบท — สุดบทแล้วให้ไปบทถัดไปเลย
-    if (reading && reading.batch * PAGE_FACES + nextFace > lastFolio) {
-      goToChapter(direction);
-      return;
-    }
-    const at = faceToPosition(nextFace);
-    const flips = at.spread !== currentSpread;
-    currentSpread = at.spread;
-    readingFocus = at.side;
-    updatePageControls(true);
-    requestFrame();
-    // ไม่ได้พลิกกระดาษ แค่เลื่อนสายตาไปอีกฝั่ง จึงไม่ต้องรออนิเมชัน
-    setTimeout(() => frameOpenSpread(false), flips ? 380 : 0);
+  // โหมดหน้าคู่ขยับทีละสเปรด (2 หน้า) โหมดหน้าเดียวขยับทีละหน้า
+  const step = wantsOnePage() ? 1 : 2;
+  const target = currentFolio() + direction * step;
+  if (target < 0 || target > reading.count - 1) {
+    goToChapter(direction);   // สุดบทแล้ว พลิกต่อ = ไปบทถัดไป
     return;
   }
-
-  const nextSpread = currentSpread + direction;
-  /* สุดชุดแล้วยังพลิกต่อ = ข้ามไปอีก 8 หน้าถัดไป ถ้าหมดบทแล้วก็ไปบทถัดไปเลย
-     ปุ่มเปลี่ยนบทอยู่ในแผงที่ถูกยุบตอนอ่าน การพลิกต่อจึงต้องพาข้ามบทได้เอง */
-  if (nextSpread < 0 || nextSpread >= SPREAD_COUNT) {
-    if (!shiftReadingBatch(direction)) goToChapter(direction);
-    return;
-  }
-  if (reading && direction > 0) {
-    const face = nextSpread === SPREAD_COUNT - 1 ? PAGE_FACES - 1 : nextSpread * 2 - 1;
-    if (reading.batch * PAGE_FACES + face > lastFolio) {
-      goToChapter(direction);
-      return;
-    }
-  }
-  currentSpread = nextSpread;
-  readingFocus = direction > 0 ? 1 : -1;
-  updatePageControls(true);
-  requestFrame();
-  setTimeout(() => frameOpenSpread(false), 380); // รอกระดาษพลิกจบก่อนค่อยเลื่อนกล้อง
+  goToFolio(target, false);
 }
 
 function updateFlexiblePage(
@@ -4512,7 +4475,17 @@ function badBreak(rows, from, at) {
 
 function paginateChapter(blocks, chapterNo, chapterTitle) {
   const rows = [];
-  blocks.forEach((block) => rows.push(...blockRows(block)));
+  blocks.forEach((block) => {
+    const made = blockRows(block);
+    /* รูปกับแผนภาพต้องอยู่หน้าเดียวกับประโยคที่เกริ่นถึงมัน
+       ("...แล้วระบบจะวาดเป็นแผนภาพให้:" แล้วแผนภาพไปโผล่หน้าถัดไป อ่านแล้วสะดุด) */
+    if ((block.kind === "image" || block.kind === "mermaid") && rows.length) {
+      for (let i = rows.length - 1; i >= 0; i -= 1) {
+        if (rows[i].draw) { rows[i].keepNext = Math.max(rows[i].keepNext || 0, 1); break; }
+      }
+    }
+    rows.push(...made);
+  });
 
   const firstBudget = TEXT_BOTTOM - 250;
   const fullBudget = TEXT_BOTTOM - TEXT_TOP;
@@ -4633,16 +4606,19 @@ function disposeLazyTextures(rig) {
 function renderReadingBatch(rig, batch) {
   const book = rig.data;
   const specs = rig.reading.specs;
-  const total = Math.ceil((rig.reading.count || specs.length) / PAGE_FACES);
+  const total = Math.ceil((rig.reading.count || specs.length) / facesPerBatch());
   const next = clamp(batch, 0, total - 1);
   disposeReadingTextures(rig);
   rig.readingTextures = [];
 
+  const onePage = wantsOnePage();
   for (let face = 0; face < PAGE_FACES; face += 1) {
     const material = rig.interiorPageMaterials[face];
     if (!material) continue;
-    const folio = next * PAGE_FACES + face;
-    const spec = specs[folio] || { kind: "blank" };
+    // โหมดหน้าคู่ไม่ใช้หน้าแรก/หน้าสุดท้ายของกระดาษชุดนี้
+    const used = onePage || (face > 0 && face < PAGE_FACES - 1);
+    const folio = used ? folioAt(next, face) : -1;
+    const spec = (folio >= 0 && specs[folio]) || { kind: "blank" };
     const texture = makeInteriorPageTexture(book, spec, folio);
     rig.readingTextures.push(texture);
     material.map = texture;
@@ -4728,18 +4704,9 @@ async function enterReading(rig, chapterNo) {
      ปกใน/สารบัญยังพลิกย้อนกลับไปดูได้ */
   const firstText = rig.reading.specs.findIndex((spec) => spec.kind === "text");
   const landing = firstText > 0 ? firstText : 1;
-  renderReadingBatch(rig, Math.floor(landing / PAGE_FACES));
-  if (wantsOnePage()) {
-    const at = faceToPosition(landing % PAGE_FACES);
-    currentSpread = at.spread;
-    readingFocus = at.side;
-  } else {
-    currentSpread = spreadForFace(landing % PAGE_FACES);
-    readingFocus = 1;
-  }
-  snapPages = true;
+  renderReadingBatch(rig, 0);
+  goToFolio(landing, true);
   updatePageControls(false);
-  setTimeout(() => frameOpenSpread(true), 60);
   return true;
 }
 
@@ -4765,47 +4732,74 @@ function spreadForFace(face) {
   return Math.floor((face + 1) / 2);
 }
 
-// ย้ายไปชุดถัดไป/ก่อนหน้า — กระดาษชุดเดิมถูกวาดใหม่ จึงต้องตัดภาพไม่ให้เห็นหน้าพลิกย้อน
-function shiftReadingBatch(direction) {
+/* ---------- เดินหน้าอ่านด้วย "เลขหน้า" ไม่ใช่ "สเปรด" ----------
+   กระดาษมี 8 หน้า แต่หน้าแรกกับหน้าสุดท้ายของชุดจะเห็นตอนสเปรดแรก/สุดท้ายเท่านั้น
+   ซึ่งเป็นสเปรดที่มีหน้าเดียว (อีกฝั่งเป็นใบรองปก) โหมดหน้าคู่จึงใช้แค่ 6 หน้ากลาง
+   เพื่อไม่ให้เจอหน้าขวาว่างเปล่าทุก ๆ 8 หน้า ส่วนโหมดหน้าเดียวใช้ครบทั้ง 8 */
+function facesPerBatch() {
+  return wantsOnePage() ? PAGE_FACES : 6;
+}
+
+function folioAt(batch, face) {
+  return wantsOnePage()
+    ? batch * PAGE_FACES + face
+    : batch * 6 + (face - 1);
+}
+
+// หน้าซ้ายสุดที่กำลังมองอยู่
+function currentFolio() {
+  const rig = activeBook;
+  const batch = rig?.reading?.batch || 0;
+  if (wantsOnePage()) return folioAt(batch, currentFace());
+  const face = currentSpread * 2 - 1;
+  return folioAt(batch, face);
+}
+
+function positionForFolio(folio) {
+  const per = facesPerBatch();
+  const batch = Math.max(0, Math.floor(folio / per));
+  const offset = folio - batch * per;
+  if (wantsOnePage()) {
+    const at = faceToPosition(offset);
+    return { batch, spread: at.spread, side: at.side };
+  }
+  const face = offset + 1;                       // 1..6
+  return { batch, spread: Math.ceil(face / 2), side: face % 2 === 1 ? -1 : 1 };
+}
+
+function goToFolio(folio, snap) {
   const rig = activeBook;
   if (!rig?.reading) return false;
-  const next = rig.reading.batch + direction;
-  if (next < 0 || next >= rig.reading.batches) return false;
-  renderReadingBatch(rig, next);
-  if (wantsOnePage()) {
-    const at = faceToPosition(direction > 0 ? 0 : PAGE_FACES - 1);
-    currentSpread = at.spread;
-    readingFocus = at.side;
-  } else {
-    /* ต้องลงที่สเปรดแรกของชุด ไม่ใช่สเปรดที่สอง ไม่งั้นหน้าแรกของชุดใหม่
-       (หน้าที่ 9, 17, …) จะถูกข้ามไปเลย */
-    currentSpread = direction > 0 ? 0 : SPREAD_COUNT - 1;
-    readingFocus = direction > 0 ? 1 : -1;
+  const target = clamp(folio, 0, rig.reading.count - 1);
+  const at = positionForFolio(target);
+  if (at.batch >= rig.reading.batches) return false;
+  if (at.batch !== rig.reading.batch) {
+    renderReadingBatch(rig, at.batch);
+    snap = true;
   }
-  snapPages = true;
+  currentSpread = at.spread;
+  readingFocus = at.side;
+  if (snap) snapPages = true;
   updatePageControls(true);
   requestFrame();
-  // ข้ามชุดคือวาดกระดาษใหม่ทั้งแปดหน้า ไถลกล้องตามไม่มีความหมาย
-  setTimeout(() => frameOpenSpread(true), 60);
+  setTimeout(() => frameOpenSpread(!!snap), snap ? 60 : 380);
   return true;
 }
 
 function readingFolioRange() {
   const rig = activeBook;
-  const base = (rig?.reading?.batch || 0) * PAGE_FACES;
-  // หน้าที่เกินจำนวนหน้าจริงคือกระดาษเปล่าที่เติมไว้ อย่านับเข้าไปในเลขหน้า
-  const last = rig?.reading?.count ? rig.reading.count - 1 : Infinity;
-  const clamp2 = (value) => Math.min(value, last);
-  if (wantsOnePage()) {
-    const face = clamp2(base + currentFace());
-    return [face, face];
+  const reading = rig?.reading;
+  if (!reading) {
+    const base = 0;
+    if (currentSpread === 0) return [base, base];
+    if (currentSpread === SPREAD_COUNT - 1) return [base + PAGE_FACES - 1, base + PAGE_FACES - 1];
+    return [base + currentSpread * 2 - 1, base + currentSpread * 2];
   }
-  if (currentSpread === 0) return [clamp2(base), clamp2(base)];
-  if (currentSpread === SPREAD_COUNT - 1) {
-    const face = clamp2(base + PAGE_FACES - 1);
-    return [face, face];
-  }
-  return [clamp2(base + currentSpread * 2 - 1), clamp2(base + currentSpread * 2)];
+  const last = reading.count - 1;
+  const left = Math.min(currentFolio(), last);
+  if (wantsOnePage()) return [left, left];
+  const right = Math.min(left + 1, last);
+  return [left, right];
 }
 
 async function goToChapter(direction) {
@@ -5096,13 +5090,18 @@ function wantsOnePage() {
 }
 
 function setSpreadPreference(value) {
+  // จำหน้าที่อ่านค้างไว้ก่อน เพราะการแบ่งหน้าต่อชุดของสองโหมดไม่เท่ากัน
+  const folio = activeBook?.reading ? currentFolio() : -1;
   spreadPreference = value;
   localStorage.setItem("ebook:shelf3dSpread", value);
-  // สเปรดแรกไม่มีหน้าซ้าย สเปรดสุดท้ายไม่มีหน้าขวา — กันเล็งไปที่หน้าที่ไม่มีอยู่
-  if (currentSpread <= 0) readingFocus = 1;
-  else if (currentSpread >= SPREAD_COUNT - 1) readingFocus = -1;
+  if (folio >= 0) {
+    const rig = activeBook;
+    rig.reading.batches = Math.ceil(rig.reading.count / facesPerBatch());
+    renderReadingBatch(rig, Math.floor(folio / facesPerBatch()));
+    goToFolio(folio, true);
+  }
   updatePageControls(false);
-  if (!frameOpenSpread()) resetInspectionView();
+  if (!frameOpenSpread(true)) resetInspectionView();
 }
 
 function frameOpenSpread(instant = false) {
