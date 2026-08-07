@@ -2796,8 +2796,11 @@ function updatePageControls(announce = false) {
   const reading = rig?.reading;
   const labels = getSpreadLabels(book);
   const interactionLocked = mode !== "detail" || !readingOpen;
-  const atFirst = currentSpread === 0 && (reading ? reading.batch === 0 : true);
-  const atLast = currentSpread === SPREAD_COUNT - 1
+  const onePageNow = wantsOnePage();
+  const face = currentFace();
+  const atFirst = (onePageNow ? face === 0 : currentSpread === 0)
+    && (reading ? reading.batch === 0 : true);
+  const atLast = (onePageNow ? face === PAGE_FACES - 1 : currentSpread === SPREAD_COUNT - 1)
     && (reading ? reading.batch >= reading.batches - 1 : true);
   const previousDisabled = interactionLocked || atFirst;
   const nextDisabled = interactionLocked || atLast;
@@ -2884,6 +2887,28 @@ function setReadingOpen(open, announce = true) {
 
 function turnPage(direction) {
   if (mode !== "detail" || !readingOpen) return;
+
+  /* โหมดหน้าเดียวต้องเดินทีละ "หน้า" ไม่ใช่ทีละ "สเปรด"
+     เพราะพลิกกระดาษหนึ่งใบเผยหน้าใหม่สองหน้า ถ้าเลื่อนทีละสเปรดแล้วเล็งแต่หน้าขวา
+     หน้าซ้ายจะถูกข้ามไปเลย — ผู้ใช้อ่านไม่ครบครึ่งเล่ม
+     ขวาของสเปรดนี้ → ซ้ายของสเปรดถัดไป → ขวาของสเปรดถัดไป */
+  if (wantsOnePage()) {
+    const nextFace = currentFace() + direction;
+    if (nextFace < 0 || nextFace >= PAGE_FACES) {
+      shiftReadingBatch(direction);
+      return;
+    }
+    const at = faceToPosition(nextFace);
+    const flips = at.spread !== currentSpread;
+    currentSpread = at.spread;
+    readingFocus = at.side;
+    updatePageControls(true);
+    requestFrame();
+    // ไม่ได้พลิกกระดาษ แค่เลื่อนสายตาไปอีกฝั่ง จึงไม่ต้องรออนิเมชัน
+    setTimeout(frameOpenSpread, flips ? 420 : 40);
+    return;
+  }
+
   const nextSpread = currentSpread + direction;
   // สุดชุดแล้วยังพลิกต่อ = ข้ามไปอีก 8 หน้าถัดไปของบทเดียวกัน
   if (nextSpread < 0 || nextSpread >= SPREAD_COUNT) {
@@ -3848,15 +3873,36 @@ async function enterReading(rig, chapterNo) {
   const firstText = rig.reading.specs.findIndex((spec) => spec.kind === "text");
   const landing = firstText > 0 ? firstText : 1;
   renderReadingBatch(rig, Math.floor(landing / PAGE_FACES));
-  currentSpread = spreadForFace(landing % PAGE_FACES);
-  readingFocus = 1;
+  if (wantsOnePage()) {
+    const at = faceToPosition(landing % PAGE_FACES);
+    currentSpread = at.spread;
+    readingFocus = at.side;
+  } else {
+    currentSpread = spreadForFace(landing % PAGE_FACES);
+    readingFocus = 1;
+  }
   snapPages = true;
   updatePageControls(false);
   setTimeout(frameOpenSpread, 60);
   return true;
 }
 
-// หน้าที่ f ของชุด อยู่ในสเปรดไหน (0 กับ 4 เป็นสเปรดหน้าเดียว ที่เหลือเป็นหน้าคู่)
+/* หน้าที่ f ของชุด อยู่ในสเปรดไหน ฝั่งไหน
+   สเปรดแรกมีแต่หน้าขวา สเปรดสุดท้ายมีแต่หน้าซ้าย ที่เหลือมีสองหน้า */
+function faceToPosition(face) {
+  if (face <= 0) return { spread: 0, side: 1 };
+  if (face >= PAGE_FACES - 1) return { spread: SPREAD_COUNT - 1, side: -1 };
+  return { spread: Math.ceil(face / 2), side: face % 2 === 1 ? -1 : 1 };
+}
+
+// หน้าที่กำลังหงายอยู่ตรงหน้าผู้อ่านตอนนี้
+function currentFace() {
+  if (currentSpread <= 0) return 0;
+  if (currentSpread >= SPREAD_COUNT - 1) return PAGE_FACES - 1;
+  return readingFocus > 0 ? currentSpread * 2 : currentSpread * 2 - 1;
+}
+
+// โหมดหน้าคู่ยังลงที่สเปรดที่มีสองหน้าเหมือนเดิม
 function spreadForFace(face) {
   if (face <= 0) return 1;
   if (face >= PAGE_FACES - 1) return SPREAD_COUNT - 1;
@@ -3870,8 +3916,14 @@ function shiftReadingBatch(direction) {
   const next = rig.reading.batch + direction;
   if (next < 0 || next >= rig.reading.batches) return false;
   renderReadingBatch(rig, next);
-  currentSpread = direction > 0 ? 1 : SPREAD_COUNT - 2;
-  readingFocus = direction > 0 ? 1 : -1;
+  if (wantsOnePage()) {
+    const at = faceToPosition(direction > 0 ? 0 : PAGE_FACES - 1);
+    currentSpread = at.spread;
+    readingFocus = at.side;
+  } else {
+    currentSpread = direction > 0 ? 1 : SPREAD_COUNT - 2;
+    readingFocus = direction > 0 ? 1 : -1;
+  }
   snapPages = true;
   updatePageControls(true);
   requestFrame();
@@ -3882,6 +3934,10 @@ function shiftReadingBatch(direction) {
 function readingFolioRange() {
   const rig = activeBook;
   const base = (rig?.reading?.batch || 0) * PAGE_FACES;
+  if (wantsOnePage()) {
+    const face = base + currentFace();
+    return [face, face];
+  }
   if (currentSpread === 0) return [base, base];
   if (currentSpread === SPREAD_COUNT - 1) return [base + PAGE_FACES - 1, base + PAGE_FACES - 1];
   return [base + currentSpread * 2 - 1, base + currentSpread * 2];
@@ -4166,6 +4222,9 @@ function wantsOnePage() {
 function setSpreadPreference(value) {
   spreadPreference = value;
   localStorage.setItem("ebook:shelf3dSpread", value);
+  // สเปรดแรกไม่มีหน้าซ้าย สเปรดสุดท้ายไม่มีหน้าขวา — กันเล็งไปที่หน้าที่ไม่มีอยู่
+  if (currentSpread <= 0) readingFocus = 1;
+  else if (currentSpread >= SPREAD_COUNT - 1) readingFocus = -1;
   updatePageControls(false);
   if (!frameOpenSpread()) resetInspectionView();
 }
