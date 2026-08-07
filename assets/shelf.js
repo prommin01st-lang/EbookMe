@@ -2867,7 +2867,7 @@ function setReadingOpen(open, announce = true) {
   // เปิดเล่มเมื่อไหร่ค่อยไปดึงเนื้อหาบทมาวาด ไม่ต้องโหลดตั้งแต่ตอนเลื่อนดูบนชั้น
   if (readingOpen && activeBook) {
     enterReading(activeBook, activeBook.data.lastChapter || 1);
-    setTimeout(frameOpenSpread, 700); // รอปกกางสุดก่อนค่อยวัดขนาด
+    setTimeout(() => frameOpenSpread(true), 700); // รอปกกางสุดก่อนค่อยวัดขนาด
   } else {
     camera.position.copy(inspectCameraPosition);
     controls.target.copy(inspectCameraTarget);
@@ -2905,7 +2905,7 @@ function turnPage(direction) {
     updatePageControls(true);
     requestFrame();
     // ไม่ได้พลิกกระดาษ แค่เลื่อนสายตาไปอีกฝั่ง จึงไม่ต้องรออนิเมชัน
-    setTimeout(frameOpenSpread, flips ? 420 : 40);
+    setTimeout(() => frameOpenSpread(false), flips ? 380 : 0);
     return;
   }
 
@@ -2919,7 +2919,7 @@ function turnPage(direction) {
   readingFocus = direction > 0 ? 1 : -1;
   updatePageControls(true);
   requestFrame();
-  setTimeout(frameOpenSpread, 420); // รอกระดาษพลิกจบก่อนค่อยเลื่อนกล้อง
+  setTimeout(() => frameOpenSpread(false), 380); // รอกระดาษพลิกจบก่อนค่อยเลื่อนกล้อง
 }
 
 function updateFlexiblePage(
@@ -3883,7 +3883,7 @@ async function enterReading(rig, chapterNo) {
   }
   snapPages = true;
   updatePageControls(false);
-  setTimeout(frameOpenSpread, 60);
+  setTimeout(() => frameOpenSpread(true), 60);
   return true;
 }
 
@@ -3927,7 +3927,8 @@ function shiftReadingBatch(direction) {
   snapPages = true;
   updatePageControls(true);
   requestFrame();
-  setTimeout(frameOpenSpread, 60);
+  // ข้ามชุดคือวาดกระดาษใหม่ทั้งแปดหน้า ไถลกล้องตามไม่มีความหมาย
+  setTimeout(() => frameOpenSpread(true), 60);
   return true;
 }
 
@@ -4192,6 +4193,9 @@ function finishClosing() {
 const readingBox = new THREE.Box3();
 const readingSize = new THREE.Vector3();
 const readingCenter = new THREE.Vector3();
+const framingPosition = new THREE.Vector3();
+const framingTarget = new THREE.Vector3();
+let framingActive = false;
 const pageBox = new THREE.Box3();
 const pageSize = new THREE.Vector3();
 const pageCenter = new THREE.Vector3();
@@ -4229,7 +4233,7 @@ function setSpreadPreference(value) {
   if (!frameOpenSpread()) resetInspectionView();
 }
 
-function frameOpenSpread() {
+function frameOpenSpread(instant = false) {
   if (mode !== "detail" || !activeBook || !readingOpen) return false;
   const onePage = wantsOnePage();
   // เฉพาะจอกว้างแนวนอนที่ใช้กรอบมาตรฐานข้าง ๆ แผงรายละเอียด
@@ -4280,10 +4284,43 @@ function frameOpenSpread() {
   const centerY = (onePage && pageSize.y ? pageCenter.y : readingCenter.y)
     - worldPerPixel * (viewHeight * 0.5 - (freeTop + freeBottom) * 0.5);
 
-  controls.target.set(centerX, centerY, inspectPosition.z);
-  camera.position.set(centerX, centerY, inspectPosition.z + distance);
-  controls.update();
+  framingPosition.set(centerX, centerY, inspectPosition.z + distance);
+  framingTarget.set(centerX, centerY, inspectPosition.z);
+
+  if (instant || reducedMotion) {
+    camera.position.copy(framingPosition);
+    controls.target.copy(framingTarget);
+    controls.update();
+    framingActive = false;
+  } else {
+    framingActive = true;
+  }
   requestFrame();
+  return true;
+}
+
+/* กล้องต้องไถลไปหาปลายทาง ไม่ใช่กระโดดไปทันที
+   ตอนสลับจากหน้าขวาไปหน้าซ้ายของสเปรดเดียวกัน กระดาษไม่ได้พลิก
+   ถ้ากล้องตัดภาพเลยจะเห็นเป็นการกระพริบ ไม่รู้ว่าย้ายไปทางไหน */
+function updateFraming(delta) {
+  if (!framingActive) return false;
+  const speed = 7.5;
+  camera.position.x = damp(camera.position.x, framingPosition.x, speed, delta);
+  camera.position.y = damp(camera.position.y, framingPosition.y, speed, delta);
+  camera.position.z = damp(camera.position.z, framingPosition.z, speed, delta);
+  controls.target.x = damp(controls.target.x, framingTarget.x, speed, delta);
+  controls.target.y = damp(controls.target.y, framingTarget.y, speed, delta);
+  controls.target.z = damp(controls.target.z, framingTarget.z, speed, delta);
+
+  // หางของ exponential ยาวมาก ตัดจบตอนที่ขยับต่อไม่ถึงหนึ่งพิกเซลแล้ว
+  if (
+    camera.position.distanceToSquared(framingPosition) < 0.00002
+    && controls.target.distanceToSquared(framingTarget) < 0.00002
+  ) {
+    camera.position.copy(framingPosition);
+    controls.target.copy(framingTarget);
+    framingActive = false;
+  }
   return true;
 }
 
@@ -4478,6 +4515,7 @@ function frame(time) {
         delta
       );
     }
+    updateFraming(delta);
     controls.update();
     updatePaginatedBook(activeBook, delta, getDetailOpenAmount());
   }
@@ -4490,6 +4528,7 @@ function frame(time) {
     || mode === "opening"
     || mode === "closing"
     || shelfMoving
+    || framingActive
     || themeIsMoving;
   if (shouldContinue && !suspended) requestFrame();
 }
@@ -4515,7 +4554,7 @@ function resize() {
     transitionCameraTarget.copy(inspectCameraTarget);
     currentViewOffsetX = detailViewOffsetX;
     applyDetailViewOffset();
-    if (!frameOpenSpread()) resetInspectionView();
+    if (!frameOpenSpread(true)) resetInspectionView();
     updatePageControls(false); // คำแนะนำใต้ปุ่มเปลี่ยนตามแนวตั้ง/แนวนอน
   }
   requestFrame();
@@ -4744,6 +4783,7 @@ async function initialize() {
   controls.maxPolarAngle = Math.PI * 0.76;
   controls.target.copy(shelfCameraTarget);
   controls.addEventListener("change", requestFrame);
+  controls.addEventListener("start", () => { framingActive = false; });
 
   RectAreaLightUniformsLib.init();
   addRoom();
