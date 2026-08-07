@@ -484,14 +484,19 @@ a:focus-visible {
   transition: color 520ms var(--sh-ease);
 }
 
+/* ชื่อเรื่องภาษาไทยยาว ๆ กินสี่บรรทัดจนปุ่มอ่านหลุดขอบจอ — ตัดที่สามบรรทัด */
 .detail-title {
+  display: -webkit-box;
   max-width: calc(100% - 28px);
   margin: 0;
+  overflow: hidden;
   font-family: var(--sh-serif);
-  font-size: clamp(2.2rem, 4.4vw, 4rem);
+  font-size: clamp(2rem, 3.8vw, 3.4rem);
   font-weight: 500;
   letter-spacing: -0.035em;
-  line-height: 1.1;
+  line-height: 1.12;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .detail-deck {
