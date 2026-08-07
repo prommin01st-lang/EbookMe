@@ -4507,12 +4507,16 @@ function paginateChapter(blocks, chapterNo, chapterTitle) {
       cursor += 1;
     }
 
-    // เลื่อนจุดตัดขึ้นมาจนกว่าจะไม่ผ่ากลางของที่ต้องอยู่ด้วยกัน
+    /* เลื่อนจุดตัดขึ้นมาจนกว่าจะไม่ผ่ากลางของที่ต้องอยู่ด้วยกัน
+       แต่ถ้าถอยจนหน้านี้แทบไม่เหลืออะไร ให้ยอมตัดตามเดิมดีกว่าได้หน้าโล่ง ๆ */
+    const filled = cursor;
     let guard = rows.length;
     while (cursor > start + 1 && badBreak(rows, start, cursor) && guard > 0) {
       cursor -= 1;
       guard -= 1;
     }
+    const drawableLeft = rows.slice(start, cursor).filter((row) => row.draw).length;
+    if (drawableLeft < 2 && filled > cursor) cursor = filled;
 
     const slice = rows.slice(start, cursor);
     // อย่าให้หน้าขึ้นต้นด้วยช่องว่างเปล่า ๆ
@@ -4675,7 +4679,14 @@ function renderBrowsePages(rig) {
 async function enterReading(rig, chapterNo) {
   const book = rig.data;
   const no = clamp(chapterNo, 1, Math.max(1, book.chapterPaths.length));
-  if (rig.reading && rig.reading.chapterNo === no) return true;
+  /* เปิดเล่มเดิมซ้ำ: เนื้อหาโหลดไว้แล้วก็จริง แต่ openDetail รีเซ็ต currentSpread เป็น 0
+     ซึ่งเป็นสเปรดที่โหมดหน้าคู่ไม่ได้ใช้ (หน้าซ้ายเป็นใบรองปก หน้าขวาเป็นกระดาษเปล่า)
+     จึงต้องพากลับไปหน้าที่ค้างไว้ทุกครั้ง ไม่ใช่ return เฉย ๆ */
+  if (rig.reading && rig.reading.chapterNo === no) {
+    renderReadingBatch(rig, Math.floor((rig.reading.folio || 0) / facesPerBatch()));
+    goToFolio(rig.reading.folio || 0, true);
+    return true;
+  }
 
   readingBusy = true;
   updatePageControls(false);
@@ -4697,7 +4708,8 @@ async function enterReading(rig, chapterNo) {
     specs,
     count: specs.count || specs.length,   // ไม่รวมหน้าเติมท้ายชุด
     batch: 0,
-    batches: 1
+    batches: 1,
+    folio: 0
   };
   /* หน้าแรกสุด (ปกใน) เป็นสเปรดหน้าเดียวโดยโครงสร้างของเล่ม — กระดาษยังไม่ถูกพลิกสักใบ
      เปิดมาแล้วจึงพาไปที่สเปรดแรกที่มีเนื้อหาจริงเลย จะได้เห็นสองหน้าคู่ทันที
@@ -4751,8 +4763,9 @@ function currentFolio() {
   const rig = activeBook;
   const batch = rig?.reading?.batch || 0;
   if (wantsOnePage()) return folioAt(batch, currentFace());
-  const face = currentSpread * 2 - 1;
-  return folioAt(batch, face);
+  // โหมดหน้าคู่ใช้สเปรด 1–3 เท่านั้น ค่าที่หลุดออกไปแปลว่าสถานะค้างจากโหมดอื่น
+  const spread = clamp(currentSpread, 1, SPREAD_COUNT - 2);
+  return folioAt(batch, spread * 2 - 1);
 }
 
 function positionForFolio(folio) {
@@ -4779,10 +4792,14 @@ function goToFolio(folio, snap) {
   }
   currentSpread = at.spread;
   readingFocus = at.side;
+  rig.reading.folio = target;
   if (snap) snapPages = true;
   updatePageControls(true);
   requestFrame();
-  setTimeout(() => frameOpenSpread(!!snap), snap ? 60 : 380);
+  /* กรอบกล้องวัดจากตำแหน่งจริงของกระดาษ ถ้าวัดตอนใบยังขยับไม่เสร็จจะได้กล่องผิดใบ
+     (เคยเล็งไปโดนใบรองปกเต็มจอ) — วัดซ้ำอีกรอบหลังทุกอย่างเข้าที่ */
+  setTimeout(() => frameOpenSpread(!!snap), snap ? 90 : 380);
+  setTimeout(() => frameOpenSpread(true), 460);
   return true;
 }
 
@@ -5098,7 +5115,9 @@ function setSpreadPreference(value) {
     const rig = activeBook;
     rig.reading.batches = Math.ceil(rig.reading.count / facesPerBatch());
     renderReadingBatch(rig, Math.floor(folio / facesPerBatch()));
-    goToFolio(folio, true);
+    goToFolio(folio, true);   // จัดกรอบกล้องให้เองแล้ว
+    updatePageControls(false);
+    return;
   }
   updatePageControls(false);
   if (!frameOpenSpread(true)) resetInspectionView();
