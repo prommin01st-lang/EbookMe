@@ -30,7 +30,9 @@ const LOW_POWER = (() => {
 const TEX = {
   cover: LOW_POWER ? { w: 448, h: 672 } : { w: 768, h: 1152 },
   spine: LOW_POWER ? { w: 224, h: 896 } : { w: 384, h: 1536 },
-  page: LOW_POWER ? { w: 288, h: 432 } : { w: 384, h: 576 },
+  /* หน้ากระดาษต้องคมกว่านี้ — ของเดิมวาดที่ 0.56–0.75 เท่าของขนาดออกแบบแล้วยืดเต็มจอ
+     ตัวหนังสือจึงเบลอ ตอนนี้มีแค่เล่มที่เปิดอยู่ที่ถือเท็กซ์เจอร์หน้าใน จึงจ่ายไหว */
+  page: LOW_POWER ? { w: 640, h: 960 } : { w: 1024, h: 1536 },
   anisotropy: LOW_POWER ? 4 : 16
 };
 
@@ -2912,8 +2914,9 @@ function updatePageControls(announce = false) {
   const face = currentFace();
   const atFirst = (onePageNow ? face === 0 : currentSpread === 0)
     && (reading ? reading.batch === 0 : true);
-  const atLast = (onePageNow ? face === PAGE_FACES - 1 : currentSpread === SPREAD_COUNT - 1)
-    && (reading ? reading.batch >= reading.batches - 1 : true);
+  const atLast = reading
+    ? readingFolioRange()[1] >= reading.count - 1
+    : (onePageNow ? face === PAGE_FACES - 1 : currentSpread === SPREAD_COUNT - 1);
   const previousDisabled = interactionLocked || atFirst;
   const nextDisabled = interactionLocked || atLast;
 
@@ -2931,7 +2934,7 @@ function updatePageControls(announce = false) {
     : "ปิดอยู่";
   if (readingOpen && reading) {
     const [from, to] = readingFolioRange();
-    const total = reading.specs.length;
+    const total = reading.count || reading.specs.length;
     pageCounter.textContent = from === to
       ? `หน้า ${from + 1} / ${total}`
       : `หน้า ${from + 1}–${to + 1} / ${total}`;
@@ -3018,12 +3021,17 @@ function turnPage(direction) {
      เพราะพลิกกระดาษหนึ่งใบเผยหน้าใหม่สองหน้า ถ้าเลื่อนทีละสเปรดแล้วเล็งแต่หน้าขวา
      หน้าซ้ายจะถูกข้ามไปเลย — ผู้ใช้อ่านไม่ครบครึ่งเล่ม
      ขวาของสเปรดนี้ → ซ้ายของสเปรดถัดไป → ขวาของสเปรดถัดไป */
+  const reading = activeBook?.reading;
+  const lastFolio = reading ? reading.count - 1 : Infinity;
+
   if (wantsOnePage()) {
     const nextFace = currentFace() + direction;
     if (nextFace < 0 || nextFace >= PAGE_FACES) {
       shiftReadingBatch(direction);
       return;
     }
+    // หน้าเติมท้ายชุดไม่ใช่หน้าของบท อย่าพาไป
+    if (reading && reading.batch * PAGE_FACES + nextFace > lastFolio) return;
     const at = faceToPosition(nextFace);
     const flips = at.spread !== currentSpread;
     currentSpread = at.spread;
@@ -3040,6 +3048,10 @@ function turnPage(direction) {
   if (nextSpread < 0 || nextSpread >= SPREAD_COUNT) {
     shiftReadingBatch(direction);
     return;
+  }
+  if (reading && direction > 0) {
+    const face = nextSpread === SPREAD_COUNT - 1 ? PAGE_FACES - 1 : nextSpread * 2 - 1;
+    if (reading.batch * PAGE_FACES + face > lastFolio) return;
   }
   currentSpread = nextSpread;
   readingFocus = direction > 0 ? 1 : -1;
@@ -4297,7 +4309,7 @@ function blockRows(block) {
 
   if (block.kind === "para") {
     pushLines(wrapRuns(block.runs, COL, STYLE.body.size), STYLE.body.lh, (pieces, _i, ctx, y) => {
-      ctx.globalAlpha = 0.88;
+      ctx.globalAlpha = 1;
       drawRunLine(ctx, pieces, M, y + 21);
     });
     push(STYLE.gap, null);
@@ -4308,7 +4320,7 @@ function blockRows(block) {
     const indent = 24 + block.depth * 22;
     // จุดนำห้ามอยู่คนละหน้ากับข้อความของข้อนั้น
     pushLines(wrapRuns(block.runs, COL - indent, STYLE.body.size), STYLE.body.lh, (pieces, index, ctx, y) => {
-      ctx.globalAlpha = 0.88;
+      ctx.globalAlpha = 1;
       if (index === 0) {
         ctx.font = `500 17px ${SANS}`;
         ctx.fillText(block.marker, M + block.depth * 22, y + 20);
@@ -4332,7 +4344,7 @@ function blockRows(block) {
       }, group, 1);
     }
     pushLines(wrapRuns(block.runs, COL - indent - 12, STYLE.body.size - 2), 27, (pieces, _i, ctx, y) => {
-      ctx.globalAlpha = 0.85;
+      ctx.globalAlpha = 0.96;
       drawRunLine(ctx, pieces, M + indent, y + 19);
     }, group);
     push(STYLE.code.pad, null, group);
@@ -4360,7 +4372,7 @@ function blockRows(block) {
     push(STYLE.code.pad, null, group);
     wrapped.forEach((text, index) => {
       push(STYLE.code.lh, (c, y) => {
-        c.globalAlpha = 0.82;
+        c.globalAlpha = 0.96;
         c.font = `${STYLE.code.size}px ${MONO}`;
         c.fillText(text, M + 12, y + 15);
       }, group, index === 0 && wrapped.length > 1 ? 1 : 0);
@@ -4391,7 +4403,7 @@ function blockRows(block) {
       push(height, (c, y) => {
         c.globalAlpha = head ? 0.14 : 0.05;
         c.fillRect(PAGE_M, y, PAGE_COL, height);
-        c.globalAlpha = head ? 1 : 0.85;
+        c.globalAlpha = 1;
         c.font = `${head ? 600 : 400} ${STYLE.table.size}px ${SANS}`;
         let x = PAGE_M + 6;
         cells.forEach((lines, index) => {
@@ -4573,7 +4585,10 @@ function buildReadingSpecs(book, chapterNo, pages) {
     },
     { kind: "colophon" }
   ];
-  // เติมหน้าเปล่าให้ครบชุดละ 8 กระดาษใบสุดท้ายจะได้ไม่ค้างภาพหน้าเก่า
+  /* กระดาษมีแปดหน้าเสมอ ชุดสุดท้ายจึงต้องเติมหน้าเปล่าไม่ให้ค้างภาพหน้าเก่า
+     แต่หน้าเติมพวกนี้ไม่ใช่หน้าของบท — count คือจำนวนหน้าจริงที่พลิกไปถึงได้
+     ของเดิมนับรวมเข้าไปด้วย ผู้ใช้จึงพลิกไปเจอหน้าโล่ง ๆ ท้ายบท */
+  specs.count = specs.length;
   while (specs.length % PAGE_FACES !== 0) specs.push({ kind: "blank" });
   return specs;
 }
@@ -4591,7 +4606,7 @@ function disposeLazyTextures(rig) {
 function renderReadingBatch(rig, batch) {
   const book = rig.data;
   const specs = rig.reading.specs;
-  const total = Math.ceil(specs.length / PAGE_FACES);
+  const total = Math.ceil((rig.reading.count || specs.length) / PAGE_FACES);
   const next = clamp(batch, 0, total - 1);
   disposeReadingTextures(rig);
   rig.readingTextures = [];
@@ -4672,10 +4687,12 @@ async function enterReading(rig, chapterNo) {
   }
 
   const pages = paginateChapter(blocks, no, book.chapterTitles[no - 1] || `บทที่ ${no}`);
+  const specs = buildReadingSpecs(book, no, pages);
   rig.reading = {
     chapterNo: no,
     title: book.chapterTitles[no - 1] || `บทที่ ${no}`,
-    specs: buildReadingSpecs(book, no, pages),
+    specs,
+    count: specs.count || specs.length,   // ไม่รวมหน้าเติมท้ายชุด
     batch: 0,
     batches: 1
   };
@@ -4733,7 +4750,9 @@ function shiftReadingBatch(direction) {
     currentSpread = at.spread;
     readingFocus = at.side;
   } else {
-    currentSpread = direction > 0 ? 1 : SPREAD_COUNT - 2;
+    /* ต้องลงที่สเปรดแรกของชุด ไม่ใช่สเปรดที่สอง ไม่งั้นหน้าแรกของชุดใหม่
+       (หน้าที่ 9, 17, …) จะถูกข้ามไปเลย */
+    currentSpread = direction > 0 ? 0 : SPREAD_COUNT - 1;
     readingFocus = direction > 0 ? 1 : -1;
   }
   snapPages = true;
@@ -4747,13 +4766,19 @@ function shiftReadingBatch(direction) {
 function readingFolioRange() {
   const rig = activeBook;
   const base = (rig?.reading?.batch || 0) * PAGE_FACES;
+  // หน้าที่เกินจำนวนหน้าจริงคือกระดาษเปล่าที่เติมไว้ อย่านับเข้าไปในเลขหน้า
+  const last = rig?.reading?.count ? rig.reading.count - 1 : Infinity;
+  const clamp2 = (value) => Math.min(value, last);
   if (wantsOnePage()) {
-    const face = base + currentFace();
+    const face = clamp2(base + currentFace());
     return [face, face];
   }
-  if (currentSpread === 0) return [base, base];
-  if (currentSpread === SPREAD_COUNT - 1) return [base + PAGE_FACES - 1, base + PAGE_FACES - 1];
-  return [base + currentSpread * 2 - 1, base + currentSpread * 2];
+  if (currentSpread === 0) return [clamp2(base), clamp2(base)];
+  if (currentSpread === SPREAD_COUNT - 1) {
+    const face = clamp2(base + PAGE_FACES - 1);
+    return [face, face];
+  }
+  return [clamp2(base + currentSpread * 2 - 1), clamp2(base + currentSpread * 2)];
 }
 
 async function goToChapter(direction) {
