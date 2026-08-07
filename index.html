@@ -309,6 +309,18 @@ window.addEventListener('shelf:ready', () => {
   }
   setView('shelf', false);
   window.ebookShelf.setActive(true);
+
+  /* ชั้นหนังสือพร้อมแล้วก็จริง แต่การหยิบเล่ม เปิดปก และดึงเนื้อหาบทยังใช้เวลาอีกหลายวินาที
+     คงม่านโหลดไว้จนกางหน้าอ่านได้จริง ไม่งั้นดูเหมือนหน้าค้างแล้วเด้งเปลี่ยนเอง */
+  if (wants3D) {
+    const veil = document.getElementById('loading');
+    veil.hidden = false;
+    document.getElementById('loading-text').textContent = 'กำลังหยิบหนังสือออกมา…';
+    const close = () => { veil.hidden = true; };
+    window.addEventListener('shelf:reading', close, { once: true });
+    setTimeout(close, 20000);   // กันม่านค้างถ้ามีอะไรพลาด
+  }
+
   if (window.ebookShelf.openBook(bookId, chapter, wants3D) && wants3D) {
     localStorage.setItem(SURFACE_KEY, '3d');
   }
@@ -320,6 +332,9 @@ document.getElementById('toggle-book').addEventListener('click', () => {
 });
 document.getElementById('read-book').addEventListener('click', () => {
   localStorage.setItem(SURFACE_KEY, '2d');
+  const veil = document.getElementById('loading');
+  document.getElementById('loading-text').textContent = 'กำลังเปิดหน้าอ่าน 2D…';
+  veil.hidden = false;
 });
 
 // ไม่มี WebGL ก็ไม่มีชั้น 3D ให้กลับไป

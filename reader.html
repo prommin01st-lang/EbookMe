@@ -79,6 +79,16 @@ const THEMES = ['light', 'sepia', 'dark'];
 const THEME_ICON = { light: '☀️', sepia: '📖', dark: '🌙' };
 const $ = id => document.getElementById(id);
 
+/* หน้า 3D ใช้เวลาโหลดหลายวินาที ระหว่างนั้นเบราว์เซอร์ยังอยู่หน้านี้
+   ถ้าไม่ขึ้นม่านบอก จะรู้สึกเหมือนกดแล้วเครื่องค้างไปเฉย ๆ */
+function showSwitching(message) {
+  const el = document.createElement('div');
+  el.className = 'switching';
+  el.innerHTML = '<div class="switching__mark" aria-hidden="true"></div><p></p>';
+  el.querySelector('p').textContent = message;
+  document.body.append(el);
+}
+
 history.scrollRestoration = 'manual';
 
 const params = new URLSearchParams(location.search);
@@ -755,6 +765,7 @@ $('modeBtn').addEventListener('click', () => setMode(paged() ? 'scroll' : 'page'
   }
   btn.addEventListener('click', () => {
     localStorage.setItem('ebook:readSurface', '3d');
+    showSwitching('กำลังเปิดหนังสือ 3D…');
     location.href = `index.html?book=${encodeURIComponent(bookId)}&ch=${ch}&read3d=1`;
   });
 })();

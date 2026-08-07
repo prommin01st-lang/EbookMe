@@ -4720,13 +4720,16 @@ async function enterReading(rig, chapterNo) {
   if (rig.reading && rig.reading.chapterNo === no) {
     renderReadingBatch(rig, Math.floor((rig.reading.folio || 0) / facesPerBatch()));
     goToFolio(rig.reading.folio || 0, true);
+    window.dispatchEvent(new CustomEvent("shelf:reading", { detail: { chapter: no } }));
     return true;
   }
 
   readingBusy = true;
   updatePageControls(false);
+  if (loadingText && !loading.hidden) loadingText.textContent = "กำลังดึงเนื้อหาบท…";
   const blocks = await loadChapterText(book, no);
   readingBusy = false;
+  if (loadingText && !loading.hidden) loadingText.textContent = "กำลังจัดหน้ากระดาษ…";
   // ระหว่างรอโหลด ผู้ใช้อาจปิดเล่มหรือเปลี่ยนไปเล่มอื่นแล้ว
   if (activeBook !== rig) return false;
   if (!blocks) {
@@ -4748,6 +4751,7 @@ async function enterReading(rig, chapterNo) {
     renderReadingBatch(rig, 0);
     goToFolio(0, true);
     updatePageControls(false);
+    window.dispatchEvent(new CustomEvent("shelf:reading", { detail: { chapter: no, failed: true } }));
     return true;
   }
 
@@ -4770,6 +4774,7 @@ async function enterReading(rig, chapterNo) {
   renderReadingBatch(rig, 0);
   goToFolio(landing, true);
   updatePageControls(false);
+  window.dispatchEvent(new CustomEvent("shelf:reading", { detail: { chapter: no } }));
   return true;
 }
 

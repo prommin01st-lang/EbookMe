@@ -587,6 +587,64 @@ mark.search-hit {
 
 /* ---------- Reader Controls & Layout ---------- */
 
+/* ---------- ม่านตอนสลับระหว่างหน้าอ่าน 2D กับหนังสือ 3D ----------
+   หน้า 3D ต้องโหลด three.js แล้วสร้างฉากก่อน ระหว่างนั้นเบราว์เซอร์ยังค้างอยู่หน้าเดิม
+   ถ้าไม่มีอะไรบอก ผู้ใช้จะเห็นเป็นการกดแล้วเครื่องแฮงก์ */
+.switching {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  gap: 1rem;
+  place-content: center;
+  place-items: center;
+  background: var(--bg);
+  color: var(--text);
+  animation: switching-in 0.18s ease-out both;
+}
+
+.switching__mark {
+  position: relative;
+  width: 46px;
+  height: 58px;
+  border: 1px solid currentColor;
+  border-radius: 2px 5px 5px 2px;
+  animation: switching-bind 1.4s cubic-bezier(0.2, 0.72, 0.24, 1) infinite alternate;
+}
+
+.switching__mark::before {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 7px;
+  width: 1px;
+  background: currentColor;
+  content: "";
+  opacity: 0.45;
+}
+
+.switching p {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+@keyframes switching-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes switching-bind {
+  from { transform: rotateY(-10deg) translateY(2px); }
+  to { transform: rotateY(16deg) translateY(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switching__mark { animation: none; }
+}
+
 .read-progress {
   position: fixed;
   top: 0;
